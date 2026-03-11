@@ -12,8 +12,12 @@ source.include_exts = py,png,jpg,kv,atlas,ttf
 # 버전
 version = 1.0
 
-# 의존성 (kivy 공식 레시피 사용)
+# requirements 줄 수정
 requirements = python3,kivy==2.3.0,pillow,matplotlib,numpy,certifi,charset-normalizer,requests,urllib3
+
+# 이 줄 추가 (없으면 추가)
+android.env_vars = MPLCONFIGDIR=/tmp,MPLBACKEND=Agg
+
 
 # 화면 방향 (가로)
 orientation = landscape
