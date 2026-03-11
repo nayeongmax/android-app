@@ -33,18 +33,28 @@ from kivy.core.image import Image as CoreImage
 
 def setup_korean_font():
     system = platform.system()
-    if system == 'Windows':
-        plt.rcParams['font.family'] = 'Malgun Gothic'
-    elif system == 'Darwin':
-        plt.rcParams['font.family'] = 'AppleGothic'
-    else:
-        candidates = ['NanumGothic', 'NanumBarunGothic', 'UnDotum', 'DejaVu Sans']
-        available = [f.name for f in fm.fontManager.ttflist]
-        for font in candidates:
-            if font in available:
-                plt.rcParams['font.family'] = font
-                break
+    try:
+        if system == 'Windows':
+            plt.rcParams['font.family'] = 'Malgun Gothic'
+        elif system == 'Darwin':
+            plt.rcParams['font.family'] = 'AppleGothic'
+        else:
+            # Android - 시스템 폰트 직접 지정 (목록 스캔 안 함)
+            android_fonts = [
+                '/system/fonts/NotoSansCJK-Regular.ttc',
+                '/system/fonts/NotoSansCJKkr-Regular.otf',
+                '/system/fonts/DroidSansFallback.ttf',
+            ]
+            for font_path in android_fonts:
+                if os.path.exists(font_path):
+                    fm.fontManager.addfont(font_path)
+                    prop = fm.FontProperties(fname=font_path)
+                    plt.rcParams['font.family'] = prop.get_name()
+                    break
+    except Exception:
+        pass
     plt.rcParams['axes.unicode_minus'] = False
+
 
 
 setup_korean_font()
