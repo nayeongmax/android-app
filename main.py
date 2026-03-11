@@ -1,16 +1,20 @@
 """
 현장 횡단면 실측 도면 작성 프로그램 - Android (Kivy)
 """
-
 import os
 import io
 import sys
 import platform
 
+# ★ Android에서 matplotlib 크래시 방지 - 반드시 matplotlib import 전에 설정
+os.environ.setdefault('MPLCONFIGDIR', '/tmp')
+os.environ.setdefault('MPLBACKEND', 'Agg')
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+
 
 from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager, Screen
@@ -32,14 +36,14 @@ from kivy.core.image import Image as CoreImage
 
 
 def setup_korean_font():
-    system = platform.system()
     try:
+        system = platform.system()
         if system == 'Windows':
             plt.rcParams['font.family'] = 'Malgun Gothic'
         elif system == 'Darwin':
             plt.rcParams['font.family'] = 'AppleGothic'
         else:
-            # Android - 시스템 폰트 직접 지정 (목록 스캔 안 함)
+            # Android - font manager 스캔 없이 직접 지정
             android_fonts = [
                 '/system/fonts/NotoSansCJK-Regular.ttc',
                 '/system/fonts/NotoSansCJKkr-Regular.otf',
@@ -47,13 +51,17 @@ def setup_korean_font():
             ]
             for font_path in android_fonts:
                 if os.path.exists(font_path):
-                    fm.fontManager.addfont(font_path)
-                    prop = fm.FontProperties(fname=font_path)
-                    plt.rcParams['font.family'] = prop.get_name()
+                    try:
+                        fm.fontManager.addfont(font_path)
+                        prop = fm.FontProperties(fname=font_path)
+                        plt.rcParams['font.family'] = prop.get_name()
+                    except Exception:
+                        pass
                     break
     except Exception:
         pass
     plt.rcParams['axes.unicode_minus'] = False
+
 
 
 
