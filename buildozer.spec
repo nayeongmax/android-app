@@ -19,10 +19,10 @@ requirements = python3,kivy==2.3.0,pillow,matplotlib,numpy,certifi,charset-norma
 orientation = landscape
 
 # 권한
-android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,READ_MEDIA_IMAGES
+android.permissions = READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO,WRITE_EXTERNAL_STORAGE
 
 # Android 설정
-android.api = 33
+android.api = 35
 android.minapi = 24
 android.ndk = 25b
 android.ndk_api = 24
