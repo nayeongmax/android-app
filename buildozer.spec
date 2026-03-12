@@ -8,6 +8,7 @@ package.domain = org.survey
 # 소스
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf
+source.include_patterns = fonts/*.ttf
 
 # 버전
 version = 1.0
