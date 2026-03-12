@@ -471,39 +471,52 @@ class InputScreen(Screen):
         self._build()
 
     def _build(self):
-        root = BoxLayout(orientation='vertical', spacing=dp(3), padding=dp(4))
+        root = BoxLayout(orientation='horizontal', spacing=dp(3), padding=dp(2))
         bg_rect(root, BG_DARK)
 
-        hdr = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6), padding=(dp(4), dp(3)))
+        # === 왼쪽: 데이터 테이블 ===
+        left = BoxLayout(orientation='vertical', size_hint_x=0.52, spacing=dp(2))
+
+        hdr = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(4), padding=(dp(2), dp(1)))
         bg_rect(hdr, BG_PANEL)
-        hdr.add_widget(mk_lbl("측점 데이터 입력", font_size=sp(16),
-                               bold=True, size_hint_x=0.65,
+        hdr.add_widget(mk_lbl("측점 데이터", font_size=sp(13),
+                               bold=True, size_hint_x=0.6,
                                halign='left', valign='middle'))
-        btn_def = mk_btn("기본값 로드", h=dp(38), size_hint_x=0.35)
+        btn_def = mk_btn("기본값", h=dp(32), size_hint_x=0.4, font_size=sp(11))
         btn_def.bind(on_press=self._load_defaults)
         hdr.add_widget(btn_def)
-        root.add_widget(hdr)
+        left.add_widget(hdr)
 
-        th = GridLayout(cols=4, size_hint_y=None, height=dp(30), spacing=dp(1))
+        th = GridLayout(cols=4, size_hint_y=None, height=dp(24), spacing=dp(1))
         bg_rect(th, (0.13, 0.32, 0.58, 1))
-        for t in ["측점명", "DL(mm)", "DH(mm)", "비고"]:
-            lbl = mk_lbl(t, font_size=sp(12), bold=True,
+        for t in ["측점명", "DL", "DH", "비고"]:
+            lbl = mk_lbl(t, font_size=sp(10), bold=True,
                          halign='center', valign='middle')
             lbl.bind(size=lbl.setter('text_size'))
             th.add_widget(lbl)
-        root.add_widget(th)
+        left.add_widget(th)
 
         sv = ScrollView(size_hint=(1, 1))
         self.table = GridLayout(cols=4, size_hint_y=None, spacing=dp(1))
         self.table.bind(minimum_height=self.table.setter('height'))
         sv.add_widget(self.table)
-        root.add_widget(sv)
+        left.add_widget(sv)
 
-        form = BoxLayout(orientation='vertical', size_hint_y=None,
-                         height=dp(240), spacing=dp(4), padding=(dp(4), dp(4)))
+        mv = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(2))
+        for txt, fn in [("UP", self._move_up), ("DOWN", self._move_down)]:
+            b = mk_btn(txt, clr=(0.28, 0.42, 0.62, 1), h=dp(28), font_size=sp(11))
+            b.bind(on_press=fn)
+            mv.add_widget(b)
+        left.add_widget(mv)
+
+        root.add_widget(left)
+
+        # === 오른쪽: 입력 폼 ===
+        form = BoxLayout(orientation='vertical', size_hint_x=0.48,
+                         spacing=dp(2), padding=(dp(2), dp(2)))
         bg_rect(form, BG_PANEL)
 
-        grid = GridLayout(cols=2, size_hint_y=None, height=dp(96), spacing=dp(4))
+        grid = GridLayout(cols=2, size_hint_y=None, height=dp(70), spacing=dp(2))
         self.inp_name = mk_input('측점명')
         self.inp_dl   = mk_input('DL (mm)', input_filter='float')
         self.inp_dh   = mk_input('DH (mm)', input_filter='float')
@@ -512,32 +525,26 @@ class InputScreen(Screen):
             grid.add_widget(w)
         form.add_widget(grid)
 
-        pg = GridLayout(cols=5, size_hint_y=None, height=dp(58), spacing=dp(2))
+        pg = GridLayout(cols=5, size_hint_y=None, height=dp(50), spacing=dp(1))
         for name in PRESET_NAMES:
-            b = mk_btn(name, clr=(0.18, 0.38, 0.62, 1), h=dp(26), font_size=sp(11))
+            b = mk_btn(name, clr=(0.18, 0.38, 0.62, 1), h=dp(22), font_size=sp(9))
             b.bind(on_press=lambda _, n=name: setattr(self.inp_name, 'text', n))
             pg.add_widget(b)
         form.add_widget(pg)
 
-        br1 = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(4))
+        br1 = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(2))
         for txt, clr, fn in [
             ("추가", COLOR_GREEN, self._add),
             ("수정", COLOR_BTN,   self._edit),
             ("삭제", COLOR_RED,   self._delete),
             ("전체삭제", (0.50, 0.18, 0.18, 1), self._clear),
         ]:
-            b = mk_btn(txt, clr=clr, h=dp(36))
+            b = mk_btn(txt, clr=clr, h=dp(30), font_size=sp(11))
             b.bind(on_press=fn)
             br1.add_widget(b)
         form.add_widget(br1)
 
-        br2 = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(4))
-        for txt, fn in [("UP", self._move_up), ("DOWN", self._move_down)]:
-            b = mk_btn(txt, clr=(0.28, 0.42, 0.62, 1), h=dp(36))
-            b.bind(on_press=fn)
-            br2.add_widget(b)
-        form.add_widget(br2)
-
+        form.add_widget(Label())
         root.add_widget(form)
         self.add_widget(root)
         self._refresh()
@@ -551,8 +558,8 @@ class InputScreen(Screen):
             is_sel = (idx == self._sel_idx)
             bg = BG_ROW_SEL if is_sel else (BG_ROW_ODD if idx % 2 else BG_ROW_EVEN)
             for val in row:
-                lbl = Label(text=str(val), size_hint_y=None, height=dp(34),
-                            font_size=sp(11), color=COLOR_TEXT,
+                lbl = Label(text=str(val), size_hint_y=None, height=dp(26),
+                            font_size=sp(10), color=COLOR_TEXT,
                             halign='center', valign='middle')
                 lbl.bind(size=lbl.setter('text_size'))
                 bg_rect(lbl, bg)
@@ -1146,7 +1153,7 @@ class SurveyCrossSectionApp(App):
         return root
 
     def _build_nav(self):
-        nav = BoxLayout(size_hint_y=None, height=dp(56), spacing=dp(1))
+        nav = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(1))
         bg_rect(nav, (0.08, 0.10, 0.16, 1))
         self._nav_btns = {}
         items = [
