@@ -18,8 +18,8 @@ requirements = python3,kivy==2.3.0,pillow,matplotlib,numpy
 # matplotlib 환경변수
 android.env_vars = MPLBACKEND=Agg
 
-# 화면 방향 (가로)
-orientation = landscape
+# 화면 방향 (세로)
+orientation = portrait
 
 # 권한
 android.permissions = READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
