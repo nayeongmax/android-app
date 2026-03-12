@@ -12,10 +12,8 @@ source.include_exts = py,png,jpg,kv,atlas,ttf
 # 버전
 version = 1.0
 
-# requirements - android 모듈은 p4a가 자동 제공하므로 명시하지 않음
-# 이렇게 되어있어야 함 (android 없이)
+# requirements
 requirements = python3,kivy==2.3.0,pillow,matplotlib,numpy
-
 
 # matplotlib 환경변수
 android.env_vars = MPLBACKEND=Agg
@@ -26,11 +24,11 @@ orientation = landscape
 # 권한
 android.permissions = READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 
-# Android 설정
-android.api = 33
-android.minapi = 21
+# Android 설정 (원래 빌드 성공했던 값 유지)
+android.api = 35
+android.minapi = 24
 android.ndk = 25b
-android.ndk_api = 21
+android.ndk_api = 24
 android.archs = arm64-v8a
 
 # 풀스크린
