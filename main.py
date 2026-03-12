@@ -224,7 +224,7 @@ def mk_btn(text, clr=None, h=None, **kw):
 
 
 def mk_lbl(text, **kw):
-    return Label(text=text, color=COLOR_TEXT, **kw)
+    return Label(text=text, color=kw.pop('color', COLOR_TEXT), **kw)
 
 
 def bg_rect(widget, color):
