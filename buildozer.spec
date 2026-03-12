@@ -12,18 +12,18 @@ source.include_exts = py,png,jpg,kv,atlas,ttf
 # 버전
 version = 1.0
 
-# requirements 줄 수정
-requirements = python3,kivy==2.3.0,pillow,matplotlib,numpy,certifi,charset-normalizer,requests,urllib3
+# requirements - 불필요한 패키지 제거 (requests/urllib3 등은 이 앱에서 미사용)
+requirements = python3,kivy==2.3.0,pillow,matplotlib,numpy,android
 
-# 이 줄 추가 (없으면 추가)
-android.env_vars = MPLCONFIGDIR=/tmp,MPLBACKEND=Agg
+# matplotlib 환경변수 - MPLCONFIGDIR은 런타임에 앱 저장소로 동적 설정됨
+android.env_vars = MPLBACKEND=Agg
 
 
 # 화면 방향 (가로)
 orientation = landscape
 
-# 권한
-android.permissions = READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO,WRITE_EXTERNAL_STORAGE
+# 권한 - Android 13+ (API 33+)와 하위 버전 모두 지원
+android.permissions = READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 
 # Android 설정
 android.api = 35
