@@ -1,44 +1,16 @@
 """
 현장 횡단면 실측 도면 작성 프로그램 - Android (Kivy)
+
+★ 핵심: matplotlib를 모듈 레벨에서 import하지 않음
+  Android에서 앱 시작 전 matplotlib import 시 font cache,
+  native library 초기화 과정에서 크래시 발생하므로
+  실제 그리기 시점까지 import를 완전히 지연함
 """
 import os
 import io
 import sys
 import platform
-
-# ★ Android에서 matplotlib 크래시 방지 - 반드시 matplotlib import 전에 설정
-# Android에서는 /tmp이 존재하지 않으므로 앱 전용 디렉토리 사용
-def _get_mpl_config_dir():
-    """Android 환경에서 안전한 matplotlib 설정 디렉토리 반환"""
-    # Android 환경 감지
-    try:
-        from android.storage import app_storage_path
-        config_dir = os.path.join(app_storage_path(), '.matplotlib')
-    except ImportError:
-        # Android가 아닌 환경 (개발/테스트용)
-        config_dir = os.path.join(os.path.expanduser('~'), '.matplotlib')
-
-    # /tmp 폴백
-    if not config_dir or not os.path.isdir(os.path.dirname(config_dir)):
-        for d in ['/tmp', '/data/local/tmp', '.']:
-            if os.path.isdir(d):
-                config_dir = os.path.join(d, '.matplotlib')
-                break
-
-    try:
-        os.makedirs(config_dir, exist_ok=True)
-    except OSError:
-        config_dir = '.'
-    return config_dir
-
-os.environ['MPLCONFIGDIR'] = _get_mpl_config_dir()
-os.environ['MPLBACKEND'] = 'Agg'
-
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
-
+import traceback
 
 from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager, Screen
@@ -57,15 +29,106 @@ from kivy.metrics import dp, sp
 from kivy.graphics import Color, Rectangle
 from kivy.clock import Clock
 from kivy.core.image import Image as CoreImage
+from kivy.logger import Logger
 
-# matplotlib 초기화 완료 플래그
-_mpl_ready = False
 
-def setup_korean_font():
-    """한국어 폰트 설정 - 앱 시작 후 호출되어야 함"""
-    global _mpl_ready
-    if _mpl_ready:
-        return
+# =====================================================
+# matplotlib 완전 지연 로딩 시스템
+# =====================================================
+_mpl_plt = None
+_mpl_fm = None
+_mpl_initialized = False
+_mpl_error = None
+
+
+def _get_safe_config_dir():
+    """matplotlib 설정 디렉토리를 안전하게 결정"""
+    candidates = []
+
+    # 1) Android 앱 전용 저장소
+    try:
+        from android.storage import app_storage_path
+        candidates.append(os.path.join(app_storage_path(), '.matplotlib'))
+    except Exception:
+        pass
+
+    # 2) 앱 실행 디렉토리
+    try:
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates.append(os.path.join(app_dir, '.matplotlib'))
+    except Exception:
+        pass
+
+    # 3) 홈 디렉토리
+    try:
+        candidates.append(os.path.join(os.path.expanduser('~'), '.matplotlib'))
+    except Exception:
+        pass
+
+    # 4) 기타 폴백
+    candidates.extend([
+        '/data/local/tmp/.matplotlib',
+        '/tmp/.matplotlib',
+    ])
+
+    for config_dir in candidates:
+        try:
+            parent = os.path.dirname(config_dir)
+            if os.path.isdir(parent):
+                os.makedirs(config_dir, exist_ok=True)
+                # 쓰기 가능 테스트
+                test_file = os.path.join(config_dir, '.test')
+                with open(test_file, 'w') as f:
+                    f.write('test')
+                os.remove(test_file)
+                return config_dir
+        except Exception:
+            continue
+
+    return '.'
+
+
+def _init_matplotlib():
+    """matplotlib를 최초 사용 시점에 안전하게 초기화"""
+    global _mpl_plt, _mpl_fm, _mpl_initialized, _mpl_error
+
+    if _mpl_initialized:
+        return _mpl_error is None
+
+    _mpl_initialized = True
+
+    try:
+        Logger.info('MPL: matplotlib 초기화 시작...')
+
+        # 환경변수 설정 (import 전에 반드시)
+        config_dir = _get_safe_config_dir()
+        os.environ['MPLCONFIGDIR'] = config_dir
+        os.environ['MPLBACKEND'] = 'Agg'
+        Logger.info(f'MPL: MPLCONFIGDIR = {config_dir}')
+
+        # matplotlib import
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import matplotlib.font_manager as fm
+
+        # 한국어 폰트 설정
+        _setup_font(plt, fm)
+
+        _mpl_plt = plt
+        _mpl_fm = fm
+        Logger.info('MPL: matplotlib 초기화 성공')
+        return True
+
+    except Exception as e:
+        _mpl_error = str(e)
+        Logger.error(f'MPL: matplotlib 초기화 실패: {e}')
+        Logger.error(traceback.format_exc())
+        return False
+
+
+def _setup_font(plt, fm):
+    """한국어 폰트 설정"""
     try:
         system = platform.system()
         if system == 'Windows':
@@ -73,7 +136,6 @@ def setup_korean_font():
         elif system == 'Darwin':
             plt.rcParams['font.family'] = 'AppleGothic'
         else:
-            # Android - font manager 스캔 없이 직접 경로 지정
             android_fonts = [
                 '/system/fonts/NotoSansCJK-Regular.ttc',
                 '/system/fonts/NotoSansCJKkr-Regular.otf',
@@ -81,28 +143,24 @@ def setup_korean_font():
                 '/system/fonts/DroidSansFallback.ttf',
                 '/system/fonts/Roboto-Regular.ttf',
             ]
-            font_set = False
             for font_path in android_fonts:
                 if os.path.exists(font_path):
                     try:
                         prop = fm.FontProperties(fname=font_path)
                         plt.rcParams['font.family'] = prop.get_name()
-                        font_set = True
+                        break
                     except Exception:
                         continue
-                    break
-            if not font_set:
-                # 폰트를 찾지 못해도 기본 폰트로 동작하도록
+            else:
                 plt.rcParams['font.family'] = 'sans-serif'
     except Exception:
         pass
     plt.rcParams['axes.unicode_minus'] = False
-    _mpl_ready = True
 
 
-# ★ 모듈 로딩 시점이 아닌 지연 초기화 - Android 크래시 방지
-# setup_korean_font()는 App.build()에서 호출됨
-
+# =====================================================
+# 앱 데이터
+# =====================================================
 DEFAULT_DATA = [
     ["좌측경계",   -8000,   500, "용지경계"],
     ["좌측법면끝",  2500,  -500, ""],
@@ -120,6 +178,7 @@ DEFAULT_DATA = [
 PRESET_NAMES = ["도로중심", "차도끝", "길어깨끝", "측구", "다이크",
                 "법면시작", "법면끝", "용지경계", "수로", "소단"]
 
+
 class AppData:
     table_data = [list(row) for row in DEFAULT_DATA]
     sections   = [{'image': None, 'photos': [], 'photo_idx': 0} for _ in range(10)]
@@ -131,6 +190,10 @@ class AppData:
     unit       = 'mm'
     title_text = '횡단면도'
 
+
+# =====================================================
+# UI 테마 색상
+# =====================================================
 BG_DARK      = (0.10, 0.12, 0.16, 1)
 BG_PANEL     = (0.16, 0.18, 0.24, 1)
 BG_ROW_ODD   = (0.20, 0.22, 0.28, 1)
@@ -144,6 +207,9 @@ COLOR_HINT   = (0.52, 0.62, 0.78, 1)
 COLOR_FIELD  = (0.22, 0.24, 0.30, 1)
 
 
+# =====================================================
+# UI 헬퍼 함수
+# =====================================================
 def mk_btn(text, clr=None, h=None, **kw):
     return Button(
         text=text,
@@ -215,7 +281,6 @@ def popup_confirm(title, msg, on_yes):
 
 
 def get_save_dir():
-    # Android 앱 저장소도 폴백에 포함
     try:
         from android.storage import primary_external_storage_path
         ext = primary_external_storage_path()
@@ -224,7 +289,7 @@ def get_save_dir():
             return dl
         if os.path.isdir(ext):
             return ext
-    except ImportError:
+    except Exception:
         pass
     for d in ['/sdcard/Download', '/storage/emulated/0/Download',
               os.path.expanduser('~'), '/tmp', '.']:
@@ -233,6 +298,9 @@ def get_save_dir():
     return '.'
 
 
+# =====================================================
+# 데이터 처리
+# =====================================================
 def get_points():
     pts = []
     cum_l, cum_h = 0.0, 0.0
@@ -258,6 +326,9 @@ def get_points():
     return pts
 
 
+# =====================================================
+# matplotlib 렌더링 (lazy import 사용)
+# =====================================================
 def place_labels(ax, xs, ys, names, x_span, y_span):
     char_w = x_span * 0.013
     level_right = {}
@@ -317,7 +388,13 @@ def draw_dims(ax, xs, ys, s, unit, x_span, y_span, ground_bottom):
 
 
 def render_figure(pts, no_idx, to_file=None, dpi=120):
-    setup_korean_font()  # 폰트 초기화 보장
+    """도면 렌더링 - 이 함수에서 최초 matplotlib import 발생"""
+    # ★ lazy import: 최초 호출 시에만 matplotlib 로드
+    if not _init_matplotlib():
+        raise RuntimeError(f"matplotlib 로드 실패: {_mpl_error}")
+
+    plt = _mpl_plt
+
     unit = AppData.unit
     s    = 0.001 if unit == 'm' else 1.0
     xs   = [p['l'] * s for p in pts]
@@ -384,6 +461,9 @@ def render_figure(pts, no_idx, to_file=None, dpi=120):
     return CoreImage(buf, ext='png').texture
 
 
+# =====================================================
+# 화면 클래스들
+# =====================================================
 class InputScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -396,7 +476,7 @@ class InputScreen(Screen):
 
         hdr = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6), padding=(dp(4), dp(3)))
         bg_rect(hdr, BG_PANEL)
-        hdr.add_widget(mk_lbl("📐 측점 데이터 입력", font_size=sp(16),
+        hdr.add_widget(mk_lbl("측점 데이터 입력", font_size=sp(16),
                                bold=True, size_hint_x=0.65,
                                halign='left', valign='middle'))
         btn_def = mk_btn("기본값 로드", h=dp(38), size_hint_x=0.35)
@@ -406,7 +486,7 @@ class InputScreen(Screen):
 
         th = GridLayout(cols=4, size_hint_y=None, height=dp(30), spacing=dp(1))
         bg_rect(th, (0.13, 0.32, 0.58, 1))
-        for t in ["측점명", "ΔL(mm)", "ΔH(mm)", "비고"]:
+        for t in ["측점명", "DL(mm)", "DH(mm)", "비고"]:
             lbl = mk_lbl(t, font_size=sp(12), bold=True,
                          halign='center', valign='middle')
             lbl.bind(size=lbl.setter('text_size'))
@@ -425,8 +505,8 @@ class InputScreen(Screen):
 
         grid = GridLayout(cols=2, size_hint_y=None, height=dp(96), spacing=dp(4))
         self.inp_name = mk_input('측점명')
-        self.inp_dl   = mk_input('ΔL (mm)', input_filter='float')
-        self.inp_dh   = mk_input('ΔH (mm)', input_filter='float')
+        self.inp_dl   = mk_input('DL (mm)', input_filter='float')
+        self.inp_dh   = mk_input('DH (mm)', input_filter='float')
         self.inp_note = mk_input('비고')
         for w in [self.inp_name, self.inp_dl, self.inp_dh, self.inp_note]:
             grid.add_widget(w)
@@ -452,7 +532,7 @@ class InputScreen(Screen):
         form.add_widget(br1)
 
         br2 = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(4))
-        for txt, fn in [("▲ 위로", self._move_up), ("▼ 아래로", self._move_down)]:
+        for txt, fn in [("UP", self._move_up), ("DOWN", self._move_down)]:
             b = mk_btn(txt, clr=(0.28, 0.42, 0.62, 1), h=dp(36))
             b.bind(on_press=fn)
             br2.add_widget(b)
@@ -495,7 +575,7 @@ class InputScreen(Screen):
             dh = float(self.inp_dh.text or '0')
             return dl, dh
         except ValueError:
-            popup_msg("입력 오류", "ΔL, ΔH는 숫자로 입력하세요.")
+            popup_msg("입력 오류", "DL, DH는 숫자로 입력하세요.")
             return None, None
 
     def _add(self, *_):
@@ -586,11 +666,11 @@ class DrawScreen(Screen):
         self.no_spin.bind(text=self._on_no)
         tb.add_widget(self.no_spin)
 
-        btn_draw = mk_btn("▶ 그리기", clr=COLOR_GREEN, h=dp(44), size_hint=(0.36, 1))
+        btn_draw = mk_btn("그리기", clr=COLOR_GREEN, h=dp(44), size_hint=(0.36, 1))
         btn_draw.bind(on_press=self._start_draw)
         tb.add_widget(btn_draw)
 
-        btn_save = mk_btn("💾 저장", h=dp(44), size_hint=(0.36, 1))
+        btn_save = mk_btn("저장", h=dp(44), size_hint=(0.36, 1))
         btn_save.bind(on_press=self._save_png)
         tb.add_widget(btn_save)
         root.add_widget(tb)
@@ -601,7 +681,7 @@ class DrawScreen(Screen):
         for key, txt in opt_map.items():
             val = getattr(AppData, f'opt_{key}')
             b = Button(
-                text=f'✓{txt}' if val else txt,
+                text=f'[v]{txt}' if val else txt,
                 background_normal='',
                 background_color=(0.22, 0.48, 0.36, 1) if val else (0.26, 0.28, 0.36, 1),
                 color=COLOR_TEXT, font_size=sp(11))
@@ -619,7 +699,7 @@ class DrawScreen(Screen):
         img_box = BoxLayout()
         bg_rect(img_box, (0.06, 0.08, 0.12, 1))
         self.draw_img = KivyImage(allow_stretch=True, keep_ratio=True)
-        self._no_img_lbl = mk_lbl("NO.를 선택하고\n[▶ 그리기]를 누르세요",
+        self._no_img_lbl = mk_lbl("NO.를 선택하고\n[그리기]를 누르세요",
                                   font_size=sp(16), halign='center', valign='middle')
         self._no_img_lbl.bind(size=self._no_img_lbl.setter('text_size'))
         img_box.add_widget(self._no_img_lbl)
@@ -654,7 +734,7 @@ class DrawScreen(Screen):
         setattr(AppData, f'opt_{key}', val)
         opt_map = {'labels': '측점명', 'dims': '치수선', 'grid': '격자', 'hatch': '해치'}
         b = self._opt_btns[key]
-        b.text = f'✓{opt_map[key]}' if val else opt_map[key]
+        b.text = f'[v]{opt_map[key]}' if val else opt_map[key]
         b.background_color = (0.22, 0.48, 0.36, 1) if val else (0.26, 0.28, 0.36, 1)
 
     def _toggle_unit(self, *_):
@@ -667,7 +747,7 @@ class DrawScreen(Screen):
             popup_msg("데이터 부족", "측점이 2개 이상 필요합니다.")
             return
         self.status.text = '그리는 중...'
-        Clock.schedule_once(lambda dt: self._do_render(pts), 0.05)
+        Clock.schedule_once(lambda dt: self._do_render(pts), 0.1)
 
     def _do_render(self, pts):
         try:
@@ -678,12 +758,12 @@ class DrawScreen(Screen):
             unit = AppData.unit
             s    = 0.001 if unit == 'm' else 1.0
             xs   = [p['l'] * s for p in pts]
-            ys   = [p['h'] * s for p in pts]
             total_w = (max(xs) - min(xs)) / s
             self.status.text = (f"[NO.{no+1}]  측점 {len(pts)}개 | "
                                 f"전체폭 {total_w:,.0f} mm | 완료")
         except Exception as e:
             self.status.text = f'오류: {e}'
+            Logger.error(f'Render: {traceback.format_exc()}')
 
     def _show_texture(self, tex):
         self._img_box.clear_widgets()
@@ -752,9 +832,9 @@ class PhotoScreen(Screen):
         nav = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(4),
                         padding=(dp(4), 0))
         for txt, fn, clr in [
-            ("◀ 이전", self._prev, COLOR_BTN),
-            ("다음 ▶", self._next, COLOR_BTN),
-            ("🗑 삭제", self._delete, COLOR_RED),
+            ("< 이전", self._prev, COLOR_BTN),
+            ("다음 >", self._next, COLOR_BTN),
+            ("삭제", self._delete, COLOR_RED),
         ]:
             b = mk_btn(txt, clr=clr, h=dp(40))
             b.bind(on_press=fn)
@@ -763,7 +843,7 @@ class PhotoScreen(Screen):
 
         act = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(4),
                         padding=(dp(4), dp(2)))
-        btn_add = mk_btn("📷  사진 추가", clr=COLOR_GREEN, h=dp(44))
+        btn_add = mk_btn("사진 추가", clr=COLOR_GREEN, h=dp(44))
         btn_add.bind(on_press=self._add)
         act.add_widget(btn_add)
         root.add_widget(act)
@@ -882,7 +962,7 @@ class ExportScreen(Screen):
                          padding=(dp(12), dp(8)))
         bg_rect(root, BG_DARK)
 
-        root.add_widget(mk_lbl("💾  저장 / 내보내기", font_size=sp(18),
+        root.add_widget(mk_lbl("저장 / 내보내기", font_size=sp(18),
                                 bold=True, size_hint_y=None, height=dp(44),
                                 halign='center', valign='middle'))
 
@@ -909,10 +989,10 @@ class ExportScreen(Screen):
         root.add_widget(Label(size_hint_y=None, height=dp(6)))
 
         for txt, fn in [
-            ("📷  PNG 이미지 저장",  self._save_png),
-            ("📄  PDF 저장 (A3)",    self._save_pdf),
-            ("📋  CSV 내보내기",     self._export_csv),
-            ("📂  CSV 가져오기",     self._import_csv),
+            ("PNG 이미지 저장",  self._save_png),
+            ("PDF 저장 (A3)",    self._save_pdf),
+            ("CSV 내보내기",     self._export_csv),
+            ("CSV 가져오기",     self._import_csv),
         ]:
             b = mk_btn(txt, h=dp(52), font_size=sp(15))
             b.bind(on_press=fn)
@@ -956,19 +1036,24 @@ class ExportScreen(Screen):
             return
         path = self._make_path('pdf')
         try:
+            if not _init_matplotlib():
+                popup_msg("오류", f"matplotlib 로드 실패: {_mpl_error}")
+                return
+            plt = _mpl_plt
             from matplotlib.backends.backend_pdf import PdfPages
+            tmp_png = os.path.join(get_save_dir(), '_tmp_pdf.png')
             with PdfPages(path) as pdf:
-                render_figure(pts, AppData.current_no, to_file='_tmp_pdf.png', dpi=200)
+                render_figure(pts, AppData.current_no, to_file=tmp_png, dpi=200)
                 fig = plt.figure(figsize=(16.54, 11.69))
                 ax  = fig.add_axes([0, 0, 1, 1])
                 from PIL import Image as PIL_Img
-                img = PIL_Img.open('_tmp_pdf.png')
+                img = PIL_Img.open(tmp_png)
                 ax.imshow(img)
                 ax.axis('off')
                 pdf.savefig(fig, bbox_inches='tight')
                 plt.close(fig)
-                if os.path.exists('_tmp_pdf.png'):
-                    os.remove('_tmp_pdf.png')
+                if os.path.exists(tmp_png):
+                    os.remove(tmp_png)
             popup_msg("저장 완료", f"PDF 저장됨:\n{path}")
         except Exception as e:
             popup_msg("오류", str(e))
@@ -977,7 +1062,7 @@ class ExportScreen(Screen):
         path = self._make_path('csv')
         try:
             with open(path, 'w', encoding='utf-8-sig') as f:
-                f.write("측점명,ΔL(mm),ΔH(mm),비고\n")
+                f.write("측점명,DL(mm),DH(mm),비고\n")
                 for row in AppData.table_data:
                     f.write(','.join(str(x) for x in row) + '\n')
             popup_msg("완료", f"CSV 저장됨:\n{path}")
@@ -1041,11 +1126,11 @@ class ExportScreen(Screen):
             popup_msg("오류", str(e))
 
 
+# =====================================================
+# 메인 앱
+# =====================================================
 class SurveyCrossSectionApp(App):
     def build(self):
-        # ★ 앱 시작 후 안전하게 matplotlib 폰트 초기화
-        setup_korean_font()
-
         Window.clearcolor = BG_DARK
 
         root = BoxLayout(orientation='vertical')
@@ -1065,10 +1150,10 @@ class SurveyCrossSectionApp(App):
         bg_rect(nav, (0.08, 0.10, 0.16, 1))
         self._nav_btns = {}
         items = [
-            ('input',  '📐\n입력'),
-            ('draw',   '📊\n그리기'),
-            ('photo',  '📷\n사진'),
-            ('export', '💾\n저장'),
+            ('input',  '입력'),
+            ('draw',   '그리기'),
+            ('photo',  '사진'),
+            ('export', '저장'),
         ]
         for scr, txt in items:
             b = Button(
@@ -1076,7 +1161,7 @@ class SurveyCrossSectionApp(App):
                 background_normal='',
                 background_color=(0.16, 0.20, 0.30, 1),
                 color=COLOR_HINT,
-                font_size=sp(11),
+                font_size=sp(13),
                 halign='center', valign='middle',
             )
             b.bind(on_press=lambda _, s=scr: self._goto(s))
