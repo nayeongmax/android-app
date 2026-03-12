@@ -7,8 +7,32 @@ import sys
 import platform
 
 # ★ Android에서 matplotlib 크래시 방지 - 반드시 matplotlib import 전에 설정
-os.environ.setdefault('MPLCONFIGDIR', '/tmp')
-os.environ.setdefault('MPLBACKEND', 'Agg')
+# Android에서는 /tmp이 존재하지 않으므로 앱 전용 디렉토리 사용
+def _get_mpl_config_dir():
+    """Android 환경에서 안전한 matplotlib 설정 디렉토리 반환"""
+    # Android 환경 감지
+    try:
+        from android.storage import app_storage_path
+        config_dir = os.path.join(app_storage_path(), '.matplotlib')
+    except ImportError:
+        # Android가 아닌 환경 (개발/테스트용)
+        config_dir = os.path.join(os.path.expanduser('~'), '.matplotlib')
+
+    # /tmp 폴백
+    if not config_dir or not os.path.isdir(os.path.dirname(config_dir)):
+        for d in ['/tmp', '/data/local/tmp', '.']:
+            if os.path.isdir(d):
+                config_dir = os.path.join(d, '.matplotlib')
+                break
+
+    try:
+        os.makedirs(config_dir, exist_ok=True)
+    except OSError:
+        config_dir = '.'
+    return config_dir
+
+os.environ['MPLCONFIGDIR'] = _get_mpl_config_dir()
+os.environ['MPLBACKEND'] = 'Agg'
 
 import matplotlib
 matplotlib.use('Agg')
@@ -34,8 +58,14 @@ from kivy.graphics import Color, Rectangle
 from kivy.clock import Clock
 from kivy.core.image import Image as CoreImage
 
+# matplotlib 초기화 완료 플래그
+_mpl_ready = False
 
 def setup_korean_font():
+    """한국어 폰트 설정 - 앱 시작 후 호출되어야 함"""
+    global _mpl_ready
+    if _mpl_ready:
+        return
     try:
         system = platform.system()
         if system == 'Windows':
@@ -43,29 +73,35 @@ def setup_korean_font():
         elif system == 'Darwin':
             plt.rcParams['font.family'] = 'AppleGothic'
         else:
-            # Android - font manager 스캔 없이 직접 지정
+            # Android - font manager 스캔 없이 직접 경로 지정
             android_fonts = [
                 '/system/fonts/NotoSansCJK-Regular.ttc',
                 '/system/fonts/NotoSansCJKkr-Regular.otf',
+                '/system/fonts/NotoSansCJKjp-Regular.otf',
                 '/system/fonts/DroidSansFallback.ttf',
+                '/system/fonts/Roboto-Regular.ttf',
             ]
+            font_set = False
             for font_path in android_fonts:
                 if os.path.exists(font_path):
                     try:
-                        fm.fontManager.addfont(font_path)
                         prop = fm.FontProperties(fname=font_path)
                         plt.rcParams['font.family'] = prop.get_name()
+                        font_set = True
                     except Exception:
-                        pass
+                        continue
                     break
+            if not font_set:
+                # 폰트를 찾지 못해도 기본 폰트로 동작하도록
+                plt.rcParams['font.family'] = 'sans-serif'
     except Exception:
         pass
     plt.rcParams['axes.unicode_minus'] = False
+    _mpl_ready = True
 
 
-
-
-setup_korean_font()
+# ★ 모듈 로딩 시점이 아닌 지연 초기화 - Android 크래시 방지
+# setup_korean_font()는 App.build()에서 호출됨
 
 DEFAULT_DATA = [
     ["좌측경계",   -8000,   500, "용지경계"],
@@ -179,6 +215,17 @@ def popup_confirm(title, msg, on_yes):
 
 
 def get_save_dir():
+    # Android 앱 저장소도 폴백에 포함
+    try:
+        from android.storage import primary_external_storage_path
+        ext = primary_external_storage_path()
+        dl = os.path.join(ext, 'Download')
+        if os.path.isdir(dl):
+            return dl
+        if os.path.isdir(ext):
+            return ext
+    except ImportError:
+        pass
     for d in ['/sdcard/Download', '/storage/emulated/0/Download',
               os.path.expanduser('~'), '/tmp', '.']:
         if os.path.isdir(d):
@@ -270,6 +317,7 @@ def draw_dims(ax, xs, ys, s, unit, x_span, y_span, ground_bottom):
 
 
 def render_figure(pts, no_idx, to_file=None, dpi=120):
+    setup_korean_font()  # 폰트 초기화 보장
     unit = AppData.unit
     s    = 0.001 if unit == 'm' else 1.0
     xs   = [p['l'] * s for p in pts]
@@ -995,6 +1043,9 @@ class ExportScreen(Screen):
 
 class SurveyCrossSectionApp(App):
     def build(self):
+        # ★ 앱 시작 후 안전하게 matplotlib 폰트 초기화
+        setup_korean_font()
+
         Window.clearcolor = BG_DARK
 
         root = BoxLayout(orientation='vertical')
