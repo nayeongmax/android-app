@@ -13,7 +13,9 @@ source.include_exts = py,png,jpg,kv,atlas,ttf
 version = 1.0
 
 # requirements - android 모듈은 p4a가 자동 제공하므로 명시하지 않음
+# 이렇게 되어있어야 함 (android 없이)
 requirements = python3,kivy==2.3.0,pillow,matplotlib,numpy
+
 
 # matplotlib 환경변수
 android.env_vars = MPLBACKEND=Agg
