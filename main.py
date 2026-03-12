@@ -218,8 +218,7 @@ def mk_btn(text, clr=None, h=None, **kw):
         background_normal='',
         background_color=clr or COLOR_BTN,
         color=COLOR_TEXT,
-                font_size=kw.pop('font_size', sp(14)),
-
+        font_size=kw.pop('font_size', sp(14)),
         **kw
     )
 
