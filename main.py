@@ -30,6 +30,20 @@ from kivy.graphics import Color, Rectangle
 from kivy.clock import Clock
 from kivy.core.image import Image as CoreImage
 from kivy.logger import Logger
+from kivy.core.text import LabelBase
+
+# =====================================================
+# 한국어 폰트 등록 (Kivy 전체 위젯에 적용)
+# =====================================================
+_FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts')
+_KR_FONT = os.path.join(_FONT_DIR, 'NotoSansKR-Regular.ttf')
+
+if os.path.exists(_KR_FONT):
+    LabelBase.register(name='NotoSansKR', fn_regular=_KR_FONT)
+    LabelBase.register(name='Roboto', fn_regular=_KR_FONT)
+    Logger.info('FONT: NotoSansKR 폰트 등록 완료')
+else:
+    Logger.warning(f'FONT: 폰트 파일 없음: {_KR_FONT}')
 
 
 # =====================================================
@@ -137,6 +151,7 @@ def _setup_font(plt, fm):
             plt.rcParams['font.family'] = 'AppleGothic'
         else:
             android_fonts = [
+                _KR_FONT,
                 '/system/fonts/NotoSansCJK-Regular.ttc',
                 '/system/fonts/NotoSansCJKkr-Regular.otf',
                 '/system/fonts/NotoSansCJKjp-Regular.otf',
