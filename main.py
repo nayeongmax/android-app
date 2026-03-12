@@ -865,6 +865,7 @@ class ExportScreen(Screen):
             ("📄  PDF 저장 (A3)",    self._save_pdf),
             ("📋  CSV 내보내기",     self._export_csv),
             ("📂  CSV 가져오기",     self._import_csv),
+            ("🔍  저장된 파일 찾기", self._browse_saved),
         ]:
             b = mk_btn(txt, h=dp(52), font_size=sp(15))
             b.bind(on_press=fn)
@@ -924,6 +925,91 @@ class ExportScreen(Screen):
             popup_msg("저장 완료", f"PDF 저장됨:\n{path}")
         except Exception as e:
             popup_msg("오류", str(e))
+
+    def _browse_saved(self, *_):
+        import glob as _glob
+        import datetime
+        save_dir = get_save_dir()
+        files = []
+        for ext in ('png', 'pdf', 'csv'):
+            files.extend(_glob.glob(os.path.join(save_dir, f'cross_section_*.{ext}')))
+        files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+
+        content = BoxLayout(orientation='vertical', spacing=dp(4))
+        if not files:
+            content.add_widget(mk_lbl(
+                f"저장된 파일이 없습니다.\n\n저장 위치:\n{save_dir}",
+                halign='center', valign='middle',
+                text_size=(Window.width * 0.8, None)))
+        else:
+            header = mk_lbl(
+                f"저장 위치: {save_dir}\n총 {len(files)}개 파일",
+                size_hint_y=None, height=dp(44),
+                font_size=sp(12), halign='center', valign='middle',
+                text_size=(Window.width * 0.8, None))
+            header.color = COLOR_HINT
+            content.add_widget(header)
+
+            scroll = ScrollView()
+            file_list = GridLayout(cols=1, spacing=dp(2),
+                                   size_hint_y=None, padding=(dp(4), 0))
+            file_list.bind(minimum_height=file_list.setter('height'))
+
+            for fpath in files[:50]:
+                fname = os.path.basename(fpath)
+                try:
+                    mtime = datetime.datetime.fromtimestamp(
+                        os.path.getmtime(fpath))
+                    size_kb = os.path.getsize(fpath) / 1024
+                    info = f"{mtime.strftime('%Y-%m-%d %H:%M')}  ({size_kb:.0f}KB)"
+                except Exception:
+                    info = ""
+
+                ext = fname.rsplit('.', 1)[-1].upper()
+                icon = {'PNG': '📷', 'PDF': '📄', 'CSV': '📋'}.get(ext, '📁')
+                row = BoxLayout(size_hint_y=None, height=dp(54),
+                                spacing=dp(4), padding=(dp(4), 0))
+                bg_rect(row, BG_ROW_ODD)
+
+                lbl_box = BoxLayout(orientation='vertical', size_hint_x=0.75)
+                name_lbl = mk_lbl(f"{icon}  {fname}", font_size=sp(12),
+                                  halign='left', valign='bottom',
+                                  text_size=(Window.width * 0.6, None))
+                info_lbl = mk_lbl(info, font_size=sp(10), halign='left',
+                                  valign='top',
+                                  text_size=(Window.width * 0.6, None))
+                info_lbl.color = COLOR_HINT
+                lbl_box.add_widget(name_lbl)
+                lbl_box.add_widget(info_lbl)
+                row.add_widget(lbl_box)
+
+                if ext == 'CSV':
+                    load_btn = mk_btn("불러오기", clr=COLOR_GREEN,
+                                      h=dp(36), size_hint_x=0.25,
+                                      font_size=sp(11))
+                    load_btn.bind(
+                        on_press=lambda _, p=fpath: self._do_import(p))
+                    row.add_widget(load_btn)
+                else:
+                    spacer = Label(size_hint_x=0.25)
+                    row.add_widget(spacer)
+
+                file_list.add_widget(row)
+
+            scroll.add_widget(file_list)
+            content.add_widget(scroll)
+
+        btn_row = BoxLayout(size_hint_y=None, height=dp(50),
+                            spacing=dp(6), padding=dp(4))
+        p = Popup(title='🔍 저장된 파일', content=content,
+                  size_hint=(0.96, 0.85),
+                  title_color=COLOR_TEXT, background='',
+                  background_color=(0.12, 0.14, 0.20, 0.97))
+        close_btn = mk_btn("닫기", h=dp(44))
+        close_btn.bind(on_press=p.dismiss)
+        btn_row.add_widget(close_btn)
+        content.add_widget(btn_row)
+        p.open()
 
     def _export_csv(self, *_):
         path = self._make_path('csv')
