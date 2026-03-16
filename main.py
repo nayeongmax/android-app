@@ -509,9 +509,9 @@ class InputScreen(Screen):
         bg_rect(root, BG_DARK)
 
         # === NO.1 ~ NO.10 탭 바 (스크롤 가능) ===
-        no_tab_scroll = ScrollView(size_hint_y=None, height=dp(38),
+        no_tab_scroll = ScrollView(size_hint_y=None, height=dp(48),
                                    do_scroll_y=False, do_scroll_x=True)
-        no_tab_row = BoxLayout(size_hint=(None, 1), height=dp(38), spacing=dp(2))
+        no_tab_row = BoxLayout(size_hint=(None, 1), height=dp(48), spacing=dp(2))
         no_tab_row.bind(minimum_width=no_tab_row.setter('width'))
         self._no_tab_btns = []
         for i in range(10):
@@ -521,7 +521,7 @@ class InputScreen(Screen):
                 background_normal='',
                 background_color=COLOR_TAB_ACTIVE if i == 0 else COLOR_TAB_INACTIVE,
                 color=(1, 1, 1, 1) if i == 0 else COLOR_HINT,
-                font_size=sp(12), bold=(i == 0),
+                font_size=sp(13), bold=(i == 0),
             )
             b.bind(on_press=lambda _, idx=i: self._switch_no(idx))
             self._no_tab_btns.append(b)
