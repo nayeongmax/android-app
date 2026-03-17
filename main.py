@@ -53,6 +53,7 @@ _mpl_plt = None
 _mpl_fm = None
 _mpl_initialized = False
 _mpl_error = None
+_kr_font_prop = None  # 한국어 FontProperties (폰트 깨짐 방지용)
 
 
 def _get_safe_config_dir():
@@ -142,7 +143,9 @@ def _init_matplotlib():
 
 
 def _setup_font(plt, fm):
-    """한국어 폰트 설정"""
+    """한국어 폰트 설정 - 안드로이드 폰트 깨짐 방지"""
+    global _kr_font_prop
+    _kr_font_prop = None
     try:
         system = platform.system()
         if system == 'Windows':
@@ -158,18 +161,28 @@ def _setup_font(plt, fm):
                 '/system/fonts/DroidSansFallback.ttf',
                 '/system/fonts/Roboto-Regular.ttf',
             ]
+            font_registered = False
             for font_path in android_fonts:
                 if os.path.exists(font_path):
                     try:
+                        # fontManager에 직접 등록하여 캐시 문제 방지
+                        fm.fontManager.addfont(font_path)
                         prop = fm.FontProperties(fname=font_path)
-                        plt.rcParams['font.family'] = prop.get_name()
+                        font_name = prop.get_name()
+                        plt.rcParams['font.family'] = font_name
+                        # 글로벌 FontProperties 저장 (개별 텍스트에도 적용)
+                        _kr_font_prop = prop
+                        Logger.info(f'MPL FONT: 폰트 등록 성공 - {font_name} ({font_path})')
+                        font_registered = True
                         break
-                    except Exception:
+                    except Exception as e:
+                        Logger.warning(f'MPL FONT: 폰트 등록 실패 ({font_path}): {e}')
                         continue
-            else:
+            if not font_registered:
                 plt.rcParams['font.family'] = 'sans-serif'
-    except Exception:
-        pass
+                Logger.warning('MPL FONT: 한국어 폰트를 찾을 수 없어 sans-serif 사용')
+    except Exception as e:
+        Logger.error(f'MPL FONT: 폰트 설정 오류: {e}')
     plt.rcParams['axes.unicode_minus'] = False
 
 
@@ -363,6 +376,7 @@ def get_points(no_idx=None):
 def place_labels(ax, xs, ys, names, x_span, y_span):
     char_w = x_span * 0.013
     level_right = {}
+    font_kw = {'fontproperties': _kr_font_prop} if _kr_font_prop else {}
     for x, y, name in zip(xs, ys, names):
         if not name:
             continue
@@ -379,11 +393,13 @@ def place_labels(ax, xs, ys, names, x_span, y_span):
                     textcoords='offset points', ha='center', va='bottom', fontsize=7.5,
                     arrowprops=arrow_kw,
                     bbox=dict(boxstyle='round,pad=0.25', fc='white',
-                              ec='#AAAAAA', alpha=0.88, lw=0.6), zorder=7)
+                              ec='#AAAAAA', alpha=0.88, lw=0.6), zorder=7,
+                    **font_kw)
 
 
 def draw_dims(ax, xs, ys, s, unit, x_span, y_span, ground_bottom):
     fmt = (lambda v: f"{v/s:+,.0f}") if unit == 'mm' else (lambda v: f"{v:+.3f}")
+    font_kw = {'fontproperties': _kr_font_prop} if _kr_font_prop else {}
     for x, y in zip(xs, ys):
         if abs(y) < 1e-9:
             continue
@@ -393,7 +409,7 @@ def draw_dims(ax, xs, ys, s, unit, x_span, y_span, ground_bottom):
                                     shrinkA=0, shrinkB=0), zorder=6)
         ax.text(x + x_span * 0.012, y / 2,
                 fmt(y) + (' mm' if unit == 'mm' else ' m'),
-                fontsize=7, color=clr, va='center', zorder=6)
+                fontsize=7, color=clr, va='center', zorder=6, **font_kw)
     dim_y  = ground_bottom + y_span * 0.06
     tick_h = y_span * 0.03
     for i in range(len(xs) - 1):
@@ -407,7 +423,7 @@ def draw_dims(ax, xs, ys, s, unit, x_span, y_span, ground_bottom):
         dist = x1 - x0
         ax.text(x1, dim_y + tick_h * 2.2,
                 f"{dist/s:,.0f}" if unit == 'mm' else f"{dist:.3f}",
-                ha='center', fontsize=7, color='#222', zorder=6)
+                ha='center', fontsize=7, color='#222', zorder=6, **font_kw)
     top_y = max(ys) + y_span * 0.30
     ax.annotate('', xy=(xs[-1], top_y), xytext=(xs[0], top_y),
                 arrowprops=dict(arrowstyle='<->', color='darkblue', lw=1.1,
@@ -415,7 +431,8 @@ def draw_dims(ax, xs, ys, s, unit, x_span, y_span, ground_bottom):
     total = xs[-1] - xs[0]
     ax.text((xs[0] + xs[-1]) / 2, top_y + y_span * 0.04,
             f"전체폭  {total/s:,.0f} mm" if unit == 'mm' else f"전체폭  {total:.3f} m",
-            ha='center', fontsize=9, color='darkblue', fontweight='bold', zorder=6)
+            ha='center', fontsize=9, color='darkblue', fontweight='bold', zorder=6,
+            **font_kw)
 
 
 def render_figure(pts, no_idx, to_file=None, dpi=120):
@@ -470,14 +487,22 @@ def render_figure(pts, no_idx, to_file=None, dpi=120):
     ax.set_xlim(xmin - xm, xmax + xm)
     ax.set_ylim(ground_bottom - y_span * 0.06, ymax + ym_top)
     ax.grid(AppData.opt_grid, alpha=0.22, linestyle=':')
-    ax.set_xlabel(f'수평거리 ({unit})', fontsize=9)
-    ax.set_ylabel(f'높이 ({unit})', fontsize=9)
+    font_kw = {'fontproperties': _kr_font_prop} if _kr_font_prop else {}
+    ax.set_xlabel(f'수평거리 ({unit})', fontsize=9, **font_kw)
+    ax.set_ylabel(f'높이 ({unit})', fontsize=9, **font_kw)
     ax.set_title(f'{AppData.title_text}  [NO.{no_idx + 1}]',
-                 fontsize=13, fontweight='bold')
+                 fontsize=13, fontweight='bold', **font_kw)
 
+    # 범례(legend)에도 한국어 폰트 적용
+    legend_prop = {'prop': _kr_font_prop} if _kr_font_prop else {}
     handles, lbls = ax.get_legend_handles_labels()
     ax_l.legend(handles, lbls, loc='center', ncol=4, fontsize=9,
-                framealpha=0.95, fancybox=True, edgecolor='#888888')
+                framealpha=0.95, fancybox=True, edgecolor='#888888',
+                **legend_prop)
+    # tick label에도 폰트 적용 (숫자 깨짐 방지)
+    if _kr_font_prop:
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontproperties(_kr_font_prop)
     fig.tight_layout(pad=1.5)
 
     if to_file:
@@ -1433,6 +1458,13 @@ class SurveyCrossSectionApp(App):
         Window.clearcolor = BG_DARK
 
         root = BoxLayout(orientation='vertical')
+
+        # 안드로이드 상태표시줄(status bar) 높이만큼 상단 여백 추가
+        # NO.1~NO.10 탭이 잘리지 않도록 함
+        status_bar_height = dp(25)
+        spacer = BoxLayout(size_hint_y=None, height=status_bar_height)
+        bg_rect(spacer, BG_DARK)
+        root.add_widget(spacer)
 
         self.sm = ScreenManager()
         self.sm.add_widget(InputScreen(name='input'))
