@@ -1012,6 +1012,13 @@ class DrawScreen(Screen):
         opt.add_widget(self.unit_btn)
         root.add_widget(opt)
 
+        # --- 횡단면도 (상단 절반) ---
+        cross_lbl = mk_lbl("횡단면도", size_hint_y=None, height=dp(22),
+                           font_size=sp(11), color=COLOR_HINT,
+                           halign='center', valign='middle')
+        cross_lbl.bind(size=cross_lbl.setter('text_size'))
+        root.add_widget(cross_lbl)
+
         img_box = BoxLayout()
         bg_rect(img_box, (0.06, 0.08, 0.12, 1))
         self.draw_img = KivyImage(allow_stretch=True, keep_ratio=True)
@@ -1021,6 +1028,37 @@ class DrawScreen(Screen):
         img_box.add_widget(self._no_img_lbl)
         self._img_box = img_box
         root.add_widget(img_box)
+
+        # --- 현장사진 (하단 절반) ---
+        photo_hdr = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(4),
+                              padding=(dp(4), 0))
+        bg_rect(photo_hdr, BG_PANEL)
+        photo_hdr.add_widget(mk_lbl("현장사진", size_hint_x=0.4,
+                                     font_size=sp(11), color=COLOR_HINT,
+                                     halign='center', valign='middle'))
+        btn_pprev = mk_btn("< 이전", clr=COLOR_BTN, h=dp(26), size_hint=(0.2, 1),
+                           font_size=sp(10))
+        btn_pprev.bind(on_press=self._photo_prev)
+        photo_hdr.add_widget(btn_pprev)
+        self._photo_counter = mk_lbl("사진 없음", size_hint_x=0.2,
+                                      font_size=sp(10), color=COLOR_HINT,
+                                      halign='center', valign='middle')
+        self._photo_counter.bind(size=self._photo_counter.setter('text_size'))
+        photo_hdr.add_widget(self._photo_counter)
+        btn_pnext = mk_btn("다음 >", clr=COLOR_BTN, h=dp(26), size_hint=(0.2, 1),
+                           font_size=sp(10))
+        btn_pnext.bind(on_press=self._photo_next)
+        photo_hdr.add_widget(btn_pnext)
+        root.add_widget(photo_hdr)
+
+        self._photo_box = BoxLayout()
+        bg_rect(self._photo_box, (0.04, 0.06, 0.10, 1))
+        self.photo_img = KivyImage(allow_stretch=True, keep_ratio=True)
+        self._no_photo_lbl = mk_lbl("현장사진 없음\n[사진] 탭에서 추가하세요",
+                                     font_size=sp(13), halign='center', valign='middle')
+        self._no_photo_lbl.bind(size=self._no_photo_lbl.setter('text_size'))
+        self._photo_box.add_widget(self._no_photo_lbl)
+        root.add_widget(self._photo_box)
 
         self.status = mk_lbl("", size_hint_y=None, height=dp(26),
                               font_size=sp(11), color=COLOR_HINT,
@@ -1035,6 +1073,7 @@ class DrawScreen(Screen):
         sec = AppData.sections[AppData.current_no]
         if sec['image']:
             self._show_texture(sec['image'])
+        self._refresh_photo()
 
     def _on_no(self, _, text):
         AppData.current_no = int(text.replace('NO.', '')) - 1
@@ -1044,6 +1083,7 @@ class DrawScreen(Screen):
         else:
             self._img_box.clear_widgets()
             self._img_box.add_widget(self._no_img_lbl)
+        self._refresh_photo()
 
     def _toggle(self, key):
         val = not getattr(AppData, f'opt_{key}')
@@ -1086,6 +1126,44 @@ class DrawScreen(Screen):
         self._img_box.clear_widgets()
         self.draw_img.texture = tex
         self._img_box.add_widget(self.draw_img)
+
+    def _refresh_photo(self):
+        sec = AppData.sections[AppData.current_no]
+        photos = sec['photos']
+        if not photos:
+            self._photo_counter.text = '사진 없음'
+            self._photo_box.clear_widgets()
+            self._photo_box.add_widget(self._no_photo_lbl)
+            return
+        idx = sec['photo_idx']
+        entry = photos[idx]
+        self._photo_counter.text = f'{idx+1}/{len(photos)}'
+        try:
+            from PIL import Image as PIL_Img
+            img = PIL_Img.open(entry['path'])
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            buf.seek(0)
+            tex = CoreImage(buf, ext='png').texture
+            self.photo_img.texture = tex
+            self._photo_box.clear_widgets()
+            self._photo_box.add_widget(self.photo_img)
+        except Exception as e:
+            self._photo_counter.text = f'로드 실패: {e}'
+
+    def _photo_prev(self, *_):
+        sec = AppData.sections[AppData.current_no]
+        if not sec['photos']:
+            return
+        sec['photo_idx'] = (sec['photo_idx'] - 1) % len(sec['photos'])
+        self._refresh_photo()
+
+    def _photo_next(self, *_):
+        sec = AppData.sections[AppData.current_no]
+        if not sec['photos']:
+            return
+        sec['photo_idx'] = (sec['photo_idx'] + 1) % len(sec['photos'])
+        self._refresh_photo()
 
     def _save_png(self, *_):
         no = AppData.current_no
@@ -1309,6 +1387,7 @@ class ExportScreen(Screen):
         for txt, fn in [
             ("PNG 이미지 저장",  self._save_png),
             ("PDF 저장 (A3)",    self._save_pdf),
+            ("PDF 횡단면+현장사진",  self._save_pdf_combined),
             ("CSV 내보내기",     self._export_csv),
             ("CSV 가져오기",     self._import_csv),
         ]:
@@ -1375,6 +1454,83 @@ class ExportScreen(Screen):
                 if os.path.exists(tmp_png):
                     os.remove(tmp_png)
             popup_msg("저장 완료", f"PDF 저장됨:\n{path}")
+        except Exception as e:
+            popup_msg("오류", str(e))
+
+    def _save_pdf_combined(self, *_):
+        """횡단면도(상단)와 현장사진(하단)을 한 페이지에 이등분하여 PDF 저장"""
+        no = self._get_no()
+        AppData.current_no = no
+        pts = get_points(no)
+        if len(pts) < 2:
+            popup_msg("안내", "측점 데이터가 없습니다.")
+            return
+        sec = AppData.sections[no]
+        if not sec['photos']:
+            popup_msg("안내", "현장사진이 없습니다.\n[사진] 탭에서 사진을 추가하세요.")
+            return
+
+        import datetime
+        fname = (f'cross_section_compare_NO{no+1}_'
+                 f'{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf')
+        path = os.path.join(get_save_dir(), fname)
+        try:
+            if not _init_matplotlib():
+                popup_msg("오류", f"matplotlib 로드 실패: {_mpl_error}")
+                return
+            plt = _mpl_plt
+            from matplotlib.backends.backend_pdf import PdfPages
+            from PIL import Image as PIL_Img
+
+            tmp_png = os.path.join(get_save_dir(), '_tmp_combined.png')
+            render_figure(pts, no, to_file=tmp_png, dpi=200)
+            cross_img = PIL_Img.open(tmp_png)
+
+            photo_entry = sec['photos'][sec['photo_idx']]
+            photo_img = PIL_Img.open(photo_entry['path'])
+
+            # A3 세로 (portrait) - 상하 이등분
+            page_w, page_h = 11.69, 16.54
+            half_h = page_h / 2.0
+
+            with PdfPages(path) as pdf:
+                fig = plt.figure(figsize=(page_w, page_h))
+
+                # 상단: 횡단면도
+                ax_top = fig.add_axes([0.03, 0.52, 0.94, 0.46])
+                ax_top.imshow(cross_img)
+                ax_top.axis('off')
+                if _kr_font_prop:
+                    ax_top.set_title(
+                        f'{AppData.title_text}  NO.{no+1}',
+                        fontproperties=_kr_font_prop, fontsize=14, pad=8)
+                else:
+                    ax_top.set_title(
+                        f'{AppData.title_text}  NO.{no+1}',
+                        fontsize=14, pad=8)
+
+                # 하단: 현장사진
+                ax_bot = fig.add_axes([0.03, 0.02, 0.94, 0.46])
+                ax_bot.imshow(photo_img)
+                ax_bot.axis('off')
+                photo_label = os.path.basename(photo_entry['path'])
+                if photo_entry.get('note'):
+                    photo_label += f"  ({photo_entry['note']})"
+                if _kr_font_prop:
+                    ax_bot.set_title(
+                        f'현장사진: {photo_label}',
+                        fontproperties=_kr_font_prop, fontsize=12, pad=8)
+                else:
+                    ax_bot.set_title(
+                        f'현장사진: {photo_label}',
+                        fontsize=12, pad=8)
+
+                pdf.savefig(fig)
+                plt.close(fig)
+
+            if os.path.exists(tmp_png):
+                os.remove(tmp_png)
+            popup_msg("저장 완료", f"횡단면+현장사진 PDF 저장됨:\n{path}")
         except Exception as e:
             popup_msg("오류", str(e))
 
