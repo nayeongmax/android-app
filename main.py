@@ -700,6 +700,9 @@ class InputScreen(Screen):
         btn_save = mk_btn("PNG 저장", h=dp(38))
         btn_save.bind(on_press=self._save_png)
         btn_row.add_widget(btn_save)
+        btn_pdf = mk_btn("PDF 저장", clr=(0.55, 0.25, 0.18, 1), h=dp(38))
+        btn_pdf.bind(on_press=self._save_pdf_combined)
+        btn_row.add_widget(btn_pdf)
         box.add_widget(btn_row)
 
         # === 횡단면도 라벨 ===
@@ -860,6 +863,72 @@ class InputScreen(Screen):
             return
         sec['photo_idx'] = (sec['photo_idx'] + 1) % len(sec['photos'])
         self._draw_refresh_photo()
+
+    def _save_pdf_combined(self, *_):
+        """횡단면도 + 현장사진을 한 페이지 PDF로 저장"""
+        no = AppData.current_no
+        pts = get_points(no)
+        if len(pts) < 2:
+            popup_msg("안내", "먼저 [횡단면도 그리기]를 실행하세요.")
+            return
+        sec = AppData.sections[no]
+        if not sec['photos']:
+            popup_msg("안내", "현장사진이 없습니다.\n[사진] 탭에서 사진을 추가하세요.")
+            return
+        import datetime
+        fname = (f'cross_section_compare_NO{no+1}_'
+                 f'{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf')
+        path = os.path.join(get_save_dir(), fname)
+        try:
+            if not _init_matplotlib():
+                popup_msg("오류", f"matplotlib 로드 실패: {_mpl_error}")
+                return
+            plt = _mpl_plt
+            from matplotlib.backends.backend_pdf import PdfPages
+            from PIL import Image as PIL_Img
+
+            tmp_png = os.path.join(get_save_dir(), '_tmp_combined.png')
+            render_figure(pts, no, to_file=tmp_png, dpi=200)
+            cross_img = PIL_Img.open(tmp_png)
+
+            photo_entry = sec['photos'][sec['photo_idx']]
+            photo_img = PIL_Img.open(photo_entry['path'])
+
+            page_w, page_h = 11.69, 16.54
+            with PdfPages(path) as pdf:
+                fig = plt.figure(figsize=(page_w, page_h))
+
+                ax_top = fig.add_axes([0.03, 0.52, 0.94, 0.46])
+                ax_top.imshow(cross_img)
+                ax_top.axis('off')
+                title_text = f'{AppData.title_text}  NO.{no+1}'
+                if _kr_font_prop:
+                    ax_top.set_title(title_text,
+                                     fontproperties=_kr_font_prop, fontsize=14, pad=8)
+                else:
+                    ax_top.set_title(title_text, fontsize=14, pad=8)
+
+                ax_bot = fig.add_axes([0.03, 0.02, 0.94, 0.46])
+                ax_bot.imshow(photo_img)
+                ax_bot.axis('off')
+                photo_label = os.path.basename(photo_entry['path'])
+                if photo_entry.get('note'):
+                    photo_label += f"  ({photo_entry['note']})"
+                if _kr_font_prop:
+                    ax_bot.set_title(f'현장사진: {photo_label}',
+                                     fontproperties=_kr_font_prop, fontsize=12, pad=8)
+                else:
+                    ax_bot.set_title(f'현장사진: {photo_label}',
+                                     fontsize=12, pad=8)
+
+                pdf.savefig(fig)
+                plt.close(fig)
+
+            if os.path.exists(tmp_png):
+                os.remove(tmp_png)
+            popup_msg("저장 완료", f"횡단면+현장사진 PDF 저장됨:\n{path}")
+        except Exception as e:
+            popup_msg("오류", str(e))
 
     # === 입력 탭 메서드들 ===
     def on_enter(self):
