@@ -341,6 +341,16 @@ def get_save_dir():
 
 _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
 
+
+def load_photo(path):
+    """사진을 EXIF orientation 보정하여 PIL Image로 반환"""
+    from PIL import Image as PIL_Img
+    from PIL import ImageOps
+    img = PIL_Img.open(path)
+    img = ImageOps.exif_transpose(img)
+    return img
+
+
 # Android 플랫폼 여부
 _IS_ANDROID = False
 try:
@@ -991,8 +1001,7 @@ class InputScreen(Screen):
         entry = photos[idx]
         self._draw_photo_counter.text = f'{idx+1}/{len(photos)}'
         try:
-            from PIL import Image as PIL_Img
-            img = PIL_Img.open(entry['path'])
+            img = load_photo(entry['path'])
             buf = io.BytesIO()
             img.save(buf, format='PNG')
             buf.seek(0)
@@ -1054,8 +1063,6 @@ class InputScreen(Screen):
             if not _init_matplotlib():
                 popup_msg("오류", f"matplotlib 로드 실패: {_mpl_error}")
                 return
-            plt = _mpl_plt
-            from matplotlib.backends.backend_pdf import PdfPages
             from PIL import Image as PIL_Img
 
             tmp_png = os.path.join(get_save_dir(), '_tmp_combined.png')
@@ -1063,37 +1070,32 @@ class InputScreen(Screen):
             cross_img = PIL_Img.open(tmp_png)
 
             photo_entry = sec['photos'][sec['photo_idx']]
-            photo_img = PIL_Img.open(photo_entry['path'])
+            photo_img = load_photo(photo_entry['path'])
 
-            page_w, page_h = 11.69, 16.54
-            with PdfPages(path) as pdf:
-                fig = plt.figure(figsize=(page_w, page_h))
+            # Pillow로 PDF 생성 (matplotlib fontTools 오류 회피)
+            cross_img = cross_img.convert('RGB')
+            photo_img = photo_img.convert('RGB')
 
-                ax_top = fig.add_axes([0.03, 0.52, 0.94, 0.46])
-                ax_top.imshow(cross_img)
-                ax_top.axis('off')
-                title_text = f'{AppData.title_text}  NO.{no+1}'
-                if _kr_font_prop:
-                    ax_top.set_title(title_text,
-                                     fontproperties=_kr_font_prop, fontsize=14, pad=8)
-                else:
-                    ax_top.set_title(title_text, fontsize=14, pad=8)
+            # A3 세로 크기 (297x420mm) → 픽셀 (200dpi 기준)
+            a3_w, a3_h = 2339, 3307
+            half_h = a3_h // 2
 
-                ax_bot = fig.add_axes([0.03, 0.02, 0.94, 0.46])
-                ax_bot.imshow(photo_img)
-                ax_bot.axis('off')
-                photo_label = os.path.basename(photo_entry['path'])
-                if photo_entry.get('note'):
-                    photo_label += f"  ({photo_entry['note']})"
-                if _kr_font_prop:
-                    ax_bot.set_title(f'현장사진: {photo_label}',
-                                     fontproperties=_kr_font_prop, fontsize=12, pad=8)
-                else:
-                    ax_bot.set_title(f'현장사진: {photo_label}',
-                                     fontsize=12, pad=8)
+            cross_img.thumbnail((a3_w - 60, half_h - 60), PIL_Img.LANCZOS)
+            photo_img.thumbnail((a3_w - 60, half_h - 60), PIL_Img.LANCZOS)
 
-                pdf.savefig(fig)
-                plt.close(fig)
+            page = PIL_Img.new('RGB', (a3_w, a3_h), (255, 255, 255))
+
+            # 상단 중앙 배치
+            cx = (a3_w - cross_img.width) // 2
+            cy = (half_h - cross_img.height) // 2
+            page.paste(cross_img, (cx, cy))
+
+            # 하단 중앙 배치
+            px = (a3_w - photo_img.width) // 2
+            py = half_h + (half_h - photo_img.height) // 2
+            page.paste(photo_img, (px, py))
+
+            page.save(path, 'PDF', resolution=200)
 
             if os.path.exists(tmp_png):
                 os.remove(tmp_png)
@@ -1460,8 +1462,7 @@ class DrawScreen(Screen):
         entry = photos[idx]
         self._photo_counter.text = f'{idx+1}/{len(photos)}'
         try:
-            from PIL import Image as PIL_Img
-            img = PIL_Img.open(entry['path'])
+            img = load_photo(entry['path'])
             buf = io.BytesIO()
             img.save(buf, format='PNG')
             buf.seek(0)
@@ -1592,8 +1593,7 @@ class PhotoScreen(Screen):
         self.counter.text  = f'[{idx+1}/{len(photos)}]  {os.path.basename(entry["path"])}'
         self.memo_inp.text = entry['note']
         try:
-            from PIL import Image as PIL_Img
-            img = PIL_Img.open(entry['path'])
+            img = load_photo(entry['path'])
             buf = io.BytesIO()
             img.save(buf, format='PNG')
             buf.seek(0)
@@ -1777,8 +1777,6 @@ class ExportScreen(Screen):
             if not _init_matplotlib():
                 popup_msg("오류", f"matplotlib 로드 실패: {_mpl_error}")
                 return
-            plt = _mpl_plt
-            from matplotlib.backends.backend_pdf import PdfPages
             from PIL import Image as PIL_Img
 
             tmp_png = os.path.join(get_save_dir(), '_tmp_combined.png')
@@ -1786,46 +1784,29 @@ class ExportScreen(Screen):
             cross_img = PIL_Img.open(tmp_png)
 
             photo_entry = sec['photos'][sec['photo_idx']]
-            photo_img = PIL_Img.open(photo_entry['path'])
+            photo_img = load_photo(photo_entry['path'])
 
-            # A3 세로 (portrait) - 상하 이등분
-            page_w, page_h = 11.69, 16.54
-            half_h = page_h / 2.0
+            # Pillow로 PDF 생성 (matplotlib fontTools 오류 회피)
+            cross_img = cross_img.convert('RGB')
+            photo_img = photo_img.convert('RGB')
 
-            with PdfPages(path) as pdf:
-                fig = plt.figure(figsize=(page_w, page_h))
+            a3_w, a3_h = 2339, 3307
+            half_h = a3_h // 2
 
-                # 상단: 횡단면도
-                ax_top = fig.add_axes([0.03, 0.52, 0.94, 0.46])
-                ax_top.imshow(cross_img)
-                ax_top.axis('off')
-                if _kr_font_prop:
-                    ax_top.set_title(
-                        f'{AppData.title_text}  NO.{no+1}',
-                        fontproperties=_kr_font_prop, fontsize=14, pad=8)
-                else:
-                    ax_top.set_title(
-                        f'{AppData.title_text}  NO.{no+1}',
-                        fontsize=14, pad=8)
+            cross_img.thumbnail((a3_w - 60, half_h - 60), PIL_Img.LANCZOS)
+            photo_img.thumbnail((a3_w - 60, half_h - 60), PIL_Img.LANCZOS)
 
-                # 하단: 현장사진
-                ax_bot = fig.add_axes([0.03, 0.02, 0.94, 0.46])
-                ax_bot.imshow(photo_img)
-                ax_bot.axis('off')
-                photo_label = os.path.basename(photo_entry['path'])
-                if photo_entry.get('note'):
-                    photo_label += f"  ({photo_entry['note']})"
-                if _kr_font_prop:
-                    ax_bot.set_title(
-                        f'현장사진: {photo_label}',
-                        fontproperties=_kr_font_prop, fontsize=12, pad=8)
-                else:
-                    ax_bot.set_title(
-                        f'현장사진: {photo_label}',
-                        fontsize=12, pad=8)
+            page = PIL_Img.new('RGB', (a3_w, a3_h), (255, 255, 255))
 
-                pdf.savefig(fig)
-                plt.close(fig)
+            cx = (a3_w - cross_img.width) // 2
+            cy = (half_h - cross_img.height) // 2
+            page.paste(cross_img, (cx, cy))
+
+            px = (a3_w - photo_img.width) // 2
+            py = half_h + (half_h - photo_img.height) // 2
+            page.paste(photo_img, (px, py))
+
+            page.save(path, 'PDF', resolution=200)
 
             if os.path.exists(tmp_png):
                 os.remove(tmp_png)
