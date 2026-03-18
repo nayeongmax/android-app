@@ -651,13 +651,11 @@ def make_combined_pdf(cross_img_path, photo_path, save_path):
     # A3 세로 (297x420mm, 200dpi)
     a3_w, a3_h = 2339, 3307
     half_h = a3_h // 2
-    margin = 30
 
-    area_w = a3_w - margin * 2
-    area_h = half_h - margin * 2
-
-    cross_fit = _fit_resize(cross_img, area_w, area_h)
-    photo_fit = _fit_resize(photo_img, area_w, area_h)
+    # 횡단면도: 비율 유지하여 상단 영역에 맞춤
+    cross_fit = _fit_resize(cross_img, a3_w, half_h)
+    # 현장사진: crop-fill로 하단 영역 꽉 채움 (여백 없이)
+    photo_fit = crop_fill(photo_img, a3_w, half_h)
 
     page = PIL_Img.new('RGB', (a3_w, a3_h), (255, 255, 255))
 
@@ -666,10 +664,8 @@ def make_combined_pdf(cross_img_path, photo_path, save_path):
     cy = (half_h - cross_fit.height) // 2
     page.paste(cross_fit, (cx, cy))
 
-    # 하단 중앙
-    px = (a3_w - photo_fit.width) // 2
-    py = half_h + (half_h - photo_fit.height) // 2
-    page.paste(photo_fit, (px, py))
+    # 하단 꽉 채움
+    page.paste(photo_fit, (0, half_h))
 
     page.save(save_path, 'PDF', resolution=200)
 
