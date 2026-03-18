@@ -416,7 +416,7 @@ def _show_android_picker(on_selected):
 
 def _uri_to_path(uri):
     """Android content:// URI를 실제 파일 경로로 변환, 불가능하면 임시파일로 복사"""
-    from jnius import autoclass, cast
+    from jnius import autoclass
 
     uri_str = uri.toString()
 
@@ -424,47 +424,124 @@ def _uri_to_path(uri):
     if uri_str.startswith('file://'):
         return uri.getPath()
 
-    # content:// URI - ContentResolver로 읽어서 임시파일로 복사
-    try:
-        context = autoclass('org.kivy.android.PythonActivity').mActivity
-        resolver = context.getContentResolver()
+    context = autoclass('org.kivy.android.PythonActivity').mActivity
+    resolver = context.getContentResolver()
 
-        # 파일명 추출 시도
-        Cursor = autoclass('android.database.Cursor')
+    # 파일명 추출
+    filename = None
+    try:
         OpenableColumns = autoclass('android.provider.OpenableColumns')
         cursor = resolver.query(uri, None, None, None, None)
-        filename = 'image.jpg'
         if cursor and cursor.moveToFirst():
             idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
             if idx >= 0:
                 filename = cursor.getString(idx)
             cursor.close()
+    except Exception:
+        pass
+    if not filename:
+        import time
+        filename = f'photo_{int(time.time() * 1000)}.jpg'
 
-        # 임시 디렉토리에 복사
-        import shutil
-        tmp_dir = os.path.join(get_save_dir(), '.photo_tmp')
-        os.makedirs(tmp_dir, exist_ok=True)
-        tmp_path = os.path.join(tmp_dir, filename)
+    tmp_dir = os.path.join(get_save_dir(), '.photo_tmp')
+    os.makedirs(tmp_dir, exist_ok=True)
+    tmp_path = os.path.join(tmp_dir, filename)
 
-        # InputStream으로 읽기
+    # 방법 1: Java InputStream → Python file (ParcelFileDescriptor 우회)
+    try:
+        pfd = resolver.openFileDescriptor(uri, 'r')
+        if pfd:
+            fd = pfd.detachFd()
+            with os.fdopen(fd, 'rb') as fin, open(tmp_path, 'wb') as fout:
+                while True:
+                    chunk = fin.read(65536)
+                    if not chunk:
+                        break
+                    fout.write(chunk)
+            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                return tmp_path
+    except Exception as e:
+        Logger.warning(f'URI변환 방법1 실패: {e}')
+
+    # 방법 2: InputStream + jarray byte[] 버퍼
+    try:
+        from jnius import jarray
         input_stream = resolver.openInputStream(uri)
-        BufferedInputStream = autoclass('java.io.BufferedInputStream')
-        bis = BufferedInputStream(input_stream)
+        byte_buf = jarray('b', b'\x00' * 16384)
 
         with open(tmp_path, 'wb') as f:
-            buf = bytearray(8192)
             while True:
-                n = bis.read(buf, 0, len(buf))
+                n = input_stream.read(byte_buf, 0, 16384)
                 if n == -1:
                     break
-                f.write(bytes(buf[:n]))
-        bis.close()
+                f.write(bytes(byte_buf[:n]))
         input_stream.close()
 
-        return tmp_path
+        if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+            return tmp_path
     except Exception as e:
-        Logger.error(f'URI변환 실패: {e}')
-        return None
+        Logger.warning(f'URI변환 방법2 실패: {e}')
+
+    # 방법 3: 1바이트씩 읽기 (느리지만 확실)
+    try:
+        input_stream = resolver.openInputStream(uri)
+        with open(tmp_path, 'wb') as f:
+            while True:
+                b = input_stream.read()
+                if b == -1:
+                    break
+                f.write(bytes([b & 0xFF]))
+        input_stream.close()
+
+        if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+            return tmp_path
+    except Exception as e:
+        Logger.error(f'URI변환 방법3 실패: {e}')
+
+    return None
+
+
+def _fit_resize(img, target_w, target_h):
+    """이미지를 target 영역에 비율 유지하며 꽉 차게 리사이즈"""
+    from PIL import Image as PIL_Img
+    w, h = img.size
+    scale = min(target_w / w, target_h / h)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+    return img.resize((new_w, new_h), PIL_Img.LANCZOS)
+
+
+def make_combined_pdf(cross_img_path, photo_path, save_path):
+    """횡단면도 + 현장사진을 A3 PDF로 생성 (상단: 횡단면, 하단: 현장사진)"""
+    from PIL import Image as PIL_Img
+
+    cross_img = PIL_Img.open(cross_img_path).convert('RGB')
+    photo_img = load_photo(photo_path).convert('RGB')
+
+    # A3 세로 (297x420mm, 200dpi)
+    a3_w, a3_h = 2339, 3307
+    half_h = a3_h // 2
+    margin = 30
+
+    area_w = a3_w - margin * 2
+    area_h = half_h - margin * 2
+
+    cross_fit = _fit_resize(cross_img, area_w, area_h)
+    photo_fit = _fit_resize(photo_img, area_w, area_h)
+
+    page = PIL_Img.new('RGB', (a3_w, a3_h), (255, 255, 255))
+
+    # 상단 중앙
+    cx = (a3_w - cross_fit.width) // 2
+    cy = (half_h - cross_fit.height) // 2
+    page.paste(cross_fit, (cx, cy))
+
+    # 하단 중앙
+    px = (a3_w - photo_fit.width) // 2
+    py = half_h + (half_h - photo_fit.height) // 2
+    page.paste(photo_fit, (px, py))
+
+    page.save(save_path, 'PDF', resolution=200)
 
 
 def _show_fallback_picker(on_selected, start_path=None):
@@ -1063,39 +1140,12 @@ class InputScreen(Screen):
             if not _init_matplotlib():
                 popup_msg("오류", f"matplotlib 로드 실패: {_mpl_error}")
                 return
-            from PIL import Image as PIL_Img
 
             tmp_png = os.path.join(get_save_dir(), '_tmp_combined.png')
             render_figure(pts, no, to_file=tmp_png, dpi=200)
-            cross_img = PIL_Img.open(tmp_png)
 
             photo_entry = sec['photos'][sec['photo_idx']]
-            photo_img = load_photo(photo_entry['path'])
-
-            # Pillow로 PDF 생성 (matplotlib fontTools 오류 회피)
-            cross_img = cross_img.convert('RGB')
-            photo_img = photo_img.convert('RGB')
-
-            # A3 세로 크기 (297x420mm) → 픽셀 (200dpi 기준)
-            a3_w, a3_h = 2339, 3307
-            half_h = a3_h // 2
-
-            cross_img.thumbnail((a3_w - 60, half_h - 60), PIL_Img.LANCZOS)
-            photo_img.thumbnail((a3_w - 60, half_h - 60), PIL_Img.LANCZOS)
-
-            page = PIL_Img.new('RGB', (a3_w, a3_h), (255, 255, 255))
-
-            # 상단 중앙 배치
-            cx = (a3_w - cross_img.width) // 2
-            cy = (half_h - cross_img.height) // 2
-            page.paste(cross_img, (cx, cy))
-
-            # 하단 중앙 배치
-            px = (a3_w - photo_img.width) // 2
-            py = half_h + (half_h - photo_img.height) // 2
-            page.paste(photo_img, (px, py))
-
-            page.save(path, 'PDF', resolution=200)
+            make_combined_pdf(tmp_png, photo_entry['path'], path)
 
             if os.path.exists(tmp_png):
                 os.remove(tmp_png)
@@ -1777,36 +1827,12 @@ class ExportScreen(Screen):
             if not _init_matplotlib():
                 popup_msg("오류", f"matplotlib 로드 실패: {_mpl_error}")
                 return
-            from PIL import Image as PIL_Img
 
             tmp_png = os.path.join(get_save_dir(), '_tmp_combined.png')
             render_figure(pts, no, to_file=tmp_png, dpi=200)
-            cross_img = PIL_Img.open(tmp_png)
 
             photo_entry = sec['photos'][sec['photo_idx']]
-            photo_img = load_photo(photo_entry['path'])
-
-            # Pillow로 PDF 생성 (matplotlib fontTools 오류 회피)
-            cross_img = cross_img.convert('RGB')
-            photo_img = photo_img.convert('RGB')
-
-            a3_w, a3_h = 2339, 3307
-            half_h = a3_h // 2
-
-            cross_img.thumbnail((a3_w - 60, half_h - 60), PIL_Img.LANCZOS)
-            photo_img.thumbnail((a3_w - 60, half_h - 60), PIL_Img.LANCZOS)
-
-            page = PIL_Img.new('RGB', (a3_w, a3_h), (255, 255, 255))
-
-            cx = (a3_w - cross_img.width) // 2
-            cy = (half_h - cross_img.height) // 2
-            page.paste(cross_img, (cx, cy))
-
-            px = (a3_w - photo_img.width) // 2
-            py = half_h + (half_h - photo_img.height) // 2
-            page.paste(photo_img, (px, py))
-
-            page.save(path, 'PDF', resolution=200)
+            make_combined_pdf(tmp_png, photo_entry['path'], path)
 
             if os.path.exists(tmp_png):
                 os.remove(tmp_png)
