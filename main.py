@@ -398,13 +398,11 @@ def _show_android_picker(on_selected):
         from android import activity as android_activity
 
         Intent = autoclass('android.content.Intent')
-        Runnable = autoclass('java.lang.Runnable')
 
         intent = Intent(Intent.ACTION_GET_CONTENT)
         intent.setType('image/*')
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, True)
         intent.addCategory(Intent.CATEGORY_OPENABLE)
-        chooser = Intent.createChooser(intent, '사진 선택')
 
         REQUEST_CODE = 9999
 
@@ -447,7 +445,7 @@ def _show_android_picker(on_selected):
         # UI 스레드에서 안전하게 Activity 실행
         def _launch(*_):
             try:
-                mActivity.startActivityForResult(chooser, REQUEST_CODE)
+                mActivity.startActivityForResult(intent, REQUEST_CODE)
             except Exception as e:
                 Logger.error(f'사진 선택기 실행 실패: {e}')
                 android_activity.unbind(on_activity_result=_on_result)
