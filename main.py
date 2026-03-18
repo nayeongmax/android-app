@@ -341,152 +341,153 @@ def get_save_dir():
 
 _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
 
+# Android 플랫폼 여부
+_IS_ANDROID = False
+try:
+    from android import mActivity
+    _IS_ANDROID = True
+except ImportError:
+    pass
+
 
 def show_image_gallery(on_selected, start_path=None):
-    """이미지 썸네일 갤러리 팝업을 열고, 선택 완료 시 on_selected(paths) 호출"""
-    selected = set()
+    """이미지 선택기 - Android에서는 시스템 파일 선택기 사용"""
+    if _IS_ANDROID:
+        _show_android_picker(on_selected)
+    else:
+        _show_fallback_picker(on_selected, start_path)
+
+
+def _show_android_picker(on_selected):
+    """Android 시스템 파일 선택기 (ACTION_OPEN_DOCUMENT) 사용"""
+    from jnius import autoclass, cast
+    from android import activity as android_activity
+
+    Intent = autoclass('android.content.Intent')
+    Uri = autoclass('android.net.Uri')
+
+    intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+    intent.setType('image/*')
+    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, True)
+    intent.addCategory(Intent.CATEGORY_OPENABLE)
+
+    REQUEST_CODE = 9999
+
+    def _on_result(request_code, result_code, data):
+        android_activity.unbind(on_activity_result=_on_result)
+        if request_code != REQUEST_CODE or data is None:
+            return
+
+        Activity = autoclass('android.app.Activity')
+        if result_code != Activity.RESULT_OK:
+            return
+
+        paths = []
+        clip = data.getClipData()
+        if clip:
+            for i in range(clip.getItemCount()):
+                uri = clip.getItemAt(i).getUri()
+                p = _uri_to_path(uri)
+                if p:
+                    paths.append(p)
+        else:
+            uri = data.getData()
+            if uri:
+                p = _uri_to_path(uri)
+                if p:
+                    paths.append(p)
+
+        if paths:
+            Clock.schedule_once(lambda dt: on_selected(paths), 0)
+
+    android_activity.bind(on_activity_result=_on_result)
+    mActivity.startActivityForResult(intent, REQUEST_CODE)
+
+
+def _uri_to_path(uri):
+    """Android content:// URI를 실제 파일 경로로 변환, 불가능하면 임시파일로 복사"""
+    from jnius import autoclass, cast
+
+    uri_str = uri.toString()
+
+    # file:// URI
+    if uri_str.startswith('file://'):
+        return uri.getPath()
+
+    # content:// URI - ContentResolver로 읽어서 임시파일로 복사
+    try:
+        context = autoclass('org.kivy.android.PythonActivity').mActivity
+        resolver = context.getContentResolver()
+
+        # 파일명 추출 시도
+        Cursor = autoclass('android.database.Cursor')
+        OpenableColumns = autoclass('android.provider.OpenableColumns')
+        cursor = resolver.query(uri, None, None, None, None)
+        filename = 'image.jpg'
+        if cursor and cursor.moveToFirst():
+            idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if idx >= 0:
+                filename = cursor.getString(idx)
+            cursor.close()
+
+        # 임시 디렉토리에 복사
+        import shutil
+        tmp_dir = os.path.join(get_save_dir(), '.photo_tmp')
+        os.makedirs(tmp_dir, exist_ok=True)
+        tmp_path = os.path.join(tmp_dir, filename)
+
+        # InputStream으로 읽기
+        input_stream = resolver.openInputStream(uri)
+        BufferedInputStream = autoclass('java.io.BufferedInputStream')
+        bis = BufferedInputStream(input_stream)
+
+        with open(tmp_path, 'wb') as f:
+            buf = bytearray(8192)
+            while True:
+                n = bis.read(buf, 0, len(buf))
+                if n == -1:
+                    break
+                f.write(bytes(buf[:n]))
+        bis.close()
+        input_stream.close()
+
+        return tmp_path
+    except Exception as e:
+        Logger.error(f'URI변환 실패: {e}')
+        return None
+
+
+def _show_fallback_picker(on_selected, start_path=None):
+    """비-Android 환경용 폴백 파일 선택기 (FileChooserListView)"""
     if start_path is None:
         start_path = get_save_dir()
 
     content = BoxLayout(orientation='vertical', spacing=dp(4))
-
-    # 상단: 현재 경로 + 상위 폴더
-    nav_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(4),
-                        padding=(dp(4), 0))
-    btn_up = mk_btn("↑ 상위", h=dp(32), size_hint=(0.25, 1), font_size=sp(11))
-    path_lbl = mk_lbl("", font_size=sp(10), color=COLOR_HINT,
-                       halign='left', valign='middle', size_hint_x=0.75)
-    path_lbl.bind(size=path_lbl.setter('text_size'))
-    nav_row.add_widget(btn_up)
-    nav_row.add_widget(path_lbl)
-    content.add_widget(nav_row)
-
-    scroll = ScrollView()
-    grid = GridLayout(cols=3, spacing=dp(4), padding=dp(4),
-                      size_hint_y=None)
-    grid.bind(minimum_height=grid.setter('height'))
-    scroll.add_widget(grid)
-    content.add_widget(scroll)
-
-    sel_lbl = mk_lbl("선택: 0장", size_hint_y=None, height=dp(24),
-                     font_size=sp(11), color=COLOR_HINT,
-                     halign='center', valign='middle')
-    sel_lbl.bind(size=sel_lbl.setter('text_size'))
-    content.add_widget(sel_lbl)
-
+    fc = FileChooserListView(
+        filters=['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.gif', '*.webp',
+                 '*.JPG', '*.JPEG', '*.PNG', '*.BMP', '*.GIF', '*.WEBP'],
+        multiselect=True,
+        path=start_path,
+    )
+    content.add_widget(fc)
     btn_row = BoxLayout(size_hint_y=None, height=dp(50),
                         spacing=dp(6), padding=dp(4))
-
-    p = Popup(title='사진 선택', content=content, size_hint=(0.96, 0.92),
+    p = Popup(title='사진 선택', content=content, size_hint=(0.96, 0.88),
               title_color=COLOR_TEXT, background='',
               background_color=(0.12, 0.14, 0.20, 0.97))
 
-    cur_path = [start_path]
-
-    def _toggle_select(filepath, thumb_box, *_):
-        if filepath in selected:
-            selected.discard(filepath)
-            thumb_box.canvas.after.clear()
-        else:
-            selected.add(filepath)
-            _draw_overlay(thumb_box)
-            thumb_box.bind(pos=lambda w, v: _draw_overlay(w),
-                           size=lambda w, v: _draw_overlay(w))
-        sel_lbl.text = f'선택: {len(selected)}장'
-
-    def _draw_overlay(box):
-        box.canvas.after.clear()
-        with box.canvas.after:
-            Color(0.2, 0.8, 0.2, 0.5)
-            Rectangle(pos=box.pos, size=box.size)
-
-    def _load_dir(dirpath):
-        grid.clear_widgets()
-        cur_path[0] = dirpath
-        path_lbl.text = dirpath
-        try:
-            entries = sorted(os.listdir(dirpath))
-        except PermissionError:
-            return
-        dirs = []
-        files = []
-        for e in entries:
-            full = os.path.join(dirpath, e)
-            if os.path.isdir(full) and not e.startswith('.'):
-                dirs.append((e, full))
-            elif os.path.isfile(full):
-                _, ext = os.path.splitext(e)
-                if ext.lower() in _IMAGE_EXTS:
-                    files.append((e, full))
-
-        thumb_h = dp(100) + dp(20)
-
-        for name, fullpath in dirs:
-            box = BoxLayout(orientation='vertical', size_hint_y=None,
-                            height=thumb_h)
-            flbl = mk_lbl("📁", font_size=sp(30), halign='center',
-                           valign='middle', size_hint_y=None, height=dp(100))
-            flbl.bind(size=flbl.setter('text_size'))
-            box.add_widget(flbl)
-            nlbl = mk_lbl(name, font_size=sp(9), halign='center',
-                          valign='top', size_hint_y=None, height=dp(20))
-            nlbl.text_size = (dp(100), dp(20))
-            nlbl.shorten = True
-            box.add_widget(nlbl)
-            box.bind(on_touch_down=lambda w, t, fp=fullpath:
-                     _on_dir(w, t, fp))
-            grid.add_widget(box)
-
-        for name, fullpath in files:
-            box = BoxLayout(orientation='vertical', size_hint_y=None,
-                            height=thumb_h)
-            img = KivyImage(source=fullpath, allow_stretch=True,
-                            keep_ratio=True, size_hint_y=None,
-                            height=dp(100))
-            box.add_widget(img)
-            nlbl = mk_lbl(name, font_size=sp(9), halign='center',
-                          valign='top', size_hint_y=None, height=dp(20))
-            nlbl.text_size = (dp(100), dp(20))
-            nlbl.shorten = True
-            box.add_widget(nlbl)
-            box.bind(on_touch_down=lambda w, t, fp=fullpath, b=box:
-                     _on_img(w, t, fp, b))
-            grid.add_widget(box)
-
-        if not dirs and not files:
-            grid.add_widget(mk_lbl("이미지 파일 없음", font_size=sp(12),
-                                   color=COLOR_HINT, halign='center',
-                                   size_hint_y=None, height=dp(60)))
-
-    def _on_dir(widget, touch, dirpath):
-        if widget.collide_point(*touch.pos):
-            _load_dir(dirpath)
-            return True
-        return False
-
-    def _on_img(widget, touch, filepath, box):
-        if widget.collide_point(*touch.pos):
-            _toggle_select(filepath, box)
-            return True
-        return False
-
-    btn_up.bind(on_press=lambda *_: _load_dir(os.path.dirname(cur_path[0]))
-                if os.path.dirname(cur_path[0]) != cur_path[0] else None)
-
-    def _sel_action(*_):
-        if selected:
-            on_selected(list(selected))
+    def sel(*_):
+        if fc.selection:
+            on_selected([path for path in fc.selection if os.path.exists(path)])
         p.dismiss()
 
-    ok  = mk_btn("선택", clr=COLOR_GREEN, h=dp(44))
+    ok = mk_btn("선택", clr=COLOR_GREEN, h=dp(44))
     cxl = mk_btn("취소", h=dp(44))
-    ok.bind(on_press=_sel_action)
+    ok.bind(on_press=sel)
     cxl.bind(on_press=p.dismiss)
     btn_row.add_widget(ok)
     btn_row.add_widget(cxl)
     content.add_widget(btn_row)
-
-    _load_dir(cur_path[0])
     p.open()
 
 
