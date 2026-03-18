@@ -748,8 +748,9 @@ class InputScreen(Screen):
         # === 현장사진 이미지 영역 (하단 절반) ===
         self._draw_photo_box = BoxLayout()
         bg_rect(self._draw_photo_box, (0.04, 0.06, 0.10, 1))
+        self._draw_photo_box.bind(on_touch_down=self._draw_photo_box_touch)
         self._draw_photo_img = KivyImage(allow_stretch=True, keep_ratio=True)
-        self._draw_no_photo_lbl = mk_lbl("현장사진 없음\n[사진] 탭에서 추가하세요",
+        self._draw_no_photo_lbl = mk_lbl("현장사진 없음\n터치하여 사진 추가",
                                          font_size=sp(13), halign='center', valign='middle')
         self._draw_no_photo_lbl.bind(size=self._draw_no_photo_lbl.setter('text_size'))
         self._draw_photo_box.add_widget(self._draw_no_photo_lbl)
@@ -849,6 +850,46 @@ class InputScreen(Screen):
             self._draw_photo_box.add_widget(self._draw_photo_img)
         except Exception as e:
             self._draw_photo_counter.text = f'로드 실패: {e}'
+
+    def _draw_photo_box_touch(self, widget, touch):
+        """현장사진 영역 터치 시 파일 선택기 열기"""
+        if widget.collide_point(*touch.pos):
+            self._draw_show_filechooser()
+            return True
+        return False
+
+    def _draw_show_filechooser(self):
+        """그리기 탭에서 현장사진 추가용 파일 선택기"""
+        content = BoxLayout(orientation='vertical', spacing=dp(4))
+        fc = FileChooserListView(
+            filters=['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.gif', '*.webp'],
+            multiselect=True,
+            path=get_save_dir(),
+        )
+        content.add_widget(fc)
+        btn_row = BoxLayout(size_hint_y=None, height=dp(50),
+                            spacing=dp(6), padding=dp(4))
+        p = Popup(title='사진 선택', content=content, size_hint=(0.96, 0.88),
+                  title_color=COLOR_TEXT, background='',
+                  background_color=(0.12, 0.14, 0.20, 0.97))
+        def sel(*_):
+            if fc.selection:
+                sec = AppData.sections[AppData.current_no]
+                for path in fc.selection:
+                    if os.path.exists(path):
+                        sec['photos'].append({'path': path, 'note': ''})
+                if sec['photos']:
+                    sec['photo_idx'] = max(0, len(sec['photos']) - len(fc.selection))
+                self._draw_refresh_photo()
+            p.dismiss()
+        ok  = mk_btn("선택", clr=COLOR_GREEN, h=dp(44))
+        cxl = mk_btn("취소", h=dp(44))
+        ok.bind(on_press=sel)
+        cxl.bind(on_press=p.dismiss)
+        btn_row.add_widget(ok)
+        btn_row.add_widget(cxl)
+        content.add_widget(btn_row)
+        p.open()
 
     def _draw_photo_prev(self, *_):
         sec = AppData.sections[AppData.current_no]
