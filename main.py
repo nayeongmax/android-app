@@ -351,6 +351,29 @@ def load_photo(path):
     return img
 
 
+def crop_fill(img, target_w, target_h):
+    """이미지를 target 영역에 비율 유지하며 꽉 채움 (넘치는 부분 중앙 크롭)"""
+    from PIL import Image as PIL_Img
+    w, h = img.size
+    target_ratio = target_w / target_h
+    img_ratio = w / h
+
+    if img_ratio > target_ratio:
+        # 이미지가 더 넓음 → 높이 맞추고 좌우 크롭
+        new_h = h
+        new_w = int(h * target_ratio)
+        left = (w - new_w) // 2
+        img = img.crop((left, 0, left + new_w, new_h))
+    else:
+        # 이미지가 더 높음 → 너비 맞추고 상하 크롭
+        new_w = w
+        new_h = int(w / target_ratio)
+        top = (h - new_h) // 2
+        img = img.crop((0, top, new_w, top + new_h))
+
+    return img.resize((int(target_w), int(target_h)), PIL_Img.LANCZOS)
+
+
 # Android 플랫폼 여부
 _IS_ANDROID = False
 try:
@@ -369,49 +392,56 @@ def show_image_gallery(on_selected, start_path=None):
 
 
 def _show_android_picker(on_selected):
-    """Android 시스템 파일 선택기 (ACTION_OPEN_DOCUMENT) 사용"""
-    from jnius import autoclass, cast
+    """Android 시스템 파일 선택기 (ACTION_GET_CONTENT) 사용"""
+    from jnius import autoclass
     from android import activity as android_activity
 
     Intent = autoclass('android.content.Intent')
-    Uri = autoclass('android.net.Uri')
 
-    intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+    intent = Intent(Intent.ACTION_GET_CONTENT)
     intent.setType('image/*')
     intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, True)
     intent.addCategory(Intent.CATEGORY_OPENABLE)
+    chooser = Intent.createChooser(intent, '사진 선택')
 
     REQUEST_CODE = 9999
 
     def _on_result(request_code, result_code, data):
         android_activity.unbind(on_activity_result=_on_result)
-        if request_code != REQUEST_CODE or data is None:
-            return
+        try:
+            if request_code != REQUEST_CODE or data is None:
+                return
 
-        Activity = autoclass('android.app.Activity')
-        if result_code != Activity.RESULT_OK:
-            return
+            Activity = autoclass('android.app.Activity')
+            if result_code != Activity.RESULT_OK:
+                return
 
-        paths = []
-        clip = data.getClipData()
-        if clip:
-            for i in range(clip.getItemCount()):
-                uri = clip.getItemAt(i).getUri()
-                p = _uri_to_path(uri)
-                if p:
-                    paths.append(p)
-        else:
-            uri = data.getData()
-            if uri:
-                p = _uri_to_path(uri)
-                if p:
-                    paths.append(p)
+            uris = []
+            clip = data.getClipData()
+            if clip:
+                for i in range(clip.getItemCount()):
+                    uris.append(clip.getItemAt(i).getUri())
+            else:
+                uri = data.getData()
+                if uri:
+                    uris.append(uri)
 
-        if paths:
-            Clock.schedule_once(lambda dt: on_selected(paths), 0)
+            paths = []
+            for uri in uris:
+                try:
+                    p = _uri_to_path(uri)
+                    if p:
+                        paths.append(p)
+                except Exception as e:
+                    Logger.warning(f'사진 변환 실패: {e}')
+
+            if paths:
+                Clock.schedule_once(lambda dt: on_selected(paths), 0)
+        except Exception as e:
+            Logger.error(f'사진 선택 결과 처리 실패: {e}')
 
     android_activity.bind(on_activity_result=_on_result)
-    mActivity.startActivityForResult(intent, REQUEST_CODE)
+    mActivity.startActivityForResult(chooser, REQUEST_CODE)
 
 
 def _uri_to_path(uri):
@@ -509,6 +539,86 @@ def _fit_resize(img, target_w, target_h):
     new_w = int(w * scale)
     new_h = int(h * scale)
     return img.resize((new_w, new_h), PIL_Img.LANCZOS)
+
+
+def save_with_picker(tmp_path, filename, mime_type, on_done=None):
+    """Android: 시스템 저장 위치 선택 후 파일 저장 / 비-Android: 바로 저장"""
+    if not _IS_ANDROID:
+        # 비-Android: 기본 경로에 저장
+        final_path = os.path.join(get_save_dir(), filename)
+        if tmp_path != final_path:
+            import shutil
+            shutil.copy2(tmp_path, final_path)
+        if on_done:
+            on_done(final_path)
+        return
+
+    from jnius import autoclass
+    from android import activity as android_activity
+
+    Intent = autoclass('android.content.Intent')
+
+    intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+    intent.setType(mime_type)
+    intent.addCategory(Intent.CATEGORY_OPENABLE)
+    intent.putExtra(Intent.EXTRA_TITLE, filename)
+
+    REQUEST_CODE = 10001
+
+    def _on_result(request_code, result_code, data):
+        android_activity.unbind(on_activity_result=_on_result)
+        try:
+            Activity = autoclass('android.app.Activity')
+            if request_code != REQUEST_CODE or result_code != Activity.RESULT_OK:
+                if on_done:
+                    Clock.schedule_once(lambda dt: on_done(None), 0)
+                return
+            if data is None:
+                if on_done:
+                    Clock.schedule_once(lambda dt: on_done(None), 0)
+                return
+
+            uri = data.getData()
+            if uri is None:
+                if on_done:
+                    Clock.schedule_once(lambda dt: on_done(None), 0)
+                return
+
+            context = autoclass('org.kivy.android.PythonActivity').mActivity
+            resolver = context.getContentResolver()
+
+            # ParcelFileDescriptor로 Python fd 기반 쓰기
+            pfd = resolver.openFileDescriptor(uri, 'w')
+            fd = pfd.detachFd()
+            with open(tmp_path, 'rb') as fin, os.fdopen(fd, 'wb') as fout:
+                while True:
+                    chunk = fin.read(65536)
+                    if not chunk:
+                        break
+                    fout.write(chunk)
+
+            display_name = filename
+            try:
+                OpenableColumns = autoclass('android.provider.OpenableColumns')
+                cursor = resolver.query(uri, None, None, None, None)
+                if cursor and cursor.moveToFirst():
+                    idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if idx >= 0:
+                        display_name = cursor.getString(idx) or filename
+                    cursor.close()
+            except Exception:
+                pass
+
+            if on_done:
+                Clock.schedule_once(lambda dt: on_done(display_name), 0)
+        except Exception as e:
+            Logger.error(f'저장 실패: {e}')
+            if on_done:
+                Clock.schedule_once(
+                    lambda dt: popup_msg("오류", f"파일 저장 실패: {e}"), 0)
+
+    android_activity.bind(on_activity_result=_on_result)
+    mActivity.startActivityForResult(intent, REQUEST_CODE)
 
 
 def make_combined_pdf(cross_img_path, photo_path, save_path):
@@ -988,7 +1098,7 @@ class InputScreen(Screen):
         self._draw_photo_box = BoxLayout()
         bg_rect(self._draw_photo_box, (0.04, 0.06, 0.10, 1))
         self._draw_photo_box.bind(on_touch_down=self._draw_photo_box_touch)
-        self._draw_photo_img = KivyImage(allow_stretch=True, keep_ratio=True)
+        self._draw_photo_img = KivyImage(allow_stretch=True, keep_ratio=False)
         self._draw_no_photo_lbl = mk_lbl("현장사진 없음\n터치하여 사진 추가",
                                          font_size=sp(13), halign='center', valign='middle')
         self._draw_no_photo_lbl.bind(size=self._draw_no_photo_lbl.setter('text_size'))
@@ -1079,6 +1189,10 @@ class InputScreen(Screen):
         self._draw_photo_counter.text = f'{idx+1}/{len(photos)}'
         try:
             img = load_photo(entry['path'])
+            # 영역 비율에 맞게 crop-fill (여백 없이 꽉 채움)
+            box_w = max(self._draw_photo_box.width, 320)
+            box_h = max(self._draw_photo_box.height, 200)
+            img = crop_fill(img, box_w, box_h)
             buf = io.BytesIO()
             img.save(buf, format='PNG')
             buf.seek(0)
@@ -1122,7 +1236,7 @@ class InputScreen(Screen):
         self._draw_refresh_photo()
 
     def _save_pdf_combined(self, *_):
-        """횡단면도 + 현장사진을 한 페이지 PDF로 저장"""
+        """횡단면도 + 현장사진을 한 페이지 PDF로 저장 (저장 위치 선택)"""
         no = AppData.current_no
         pts = get_points(no)
         if len(pts) < 2:
@@ -1135,7 +1249,6 @@ class InputScreen(Screen):
         import datetime
         fname = (f'cross_section_compare_NO{no+1}_'
                  f'{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf')
-        path = os.path.join(get_save_dir(), fname)
         try:
             if not _init_matplotlib():
                 popup_msg("오류", f"matplotlib 로드 실패: {_mpl_error}")
@@ -1145,11 +1258,20 @@ class InputScreen(Screen):
             render_figure(pts, no, to_file=tmp_png, dpi=200)
 
             photo_entry = sec['photos'][sec['photo_idx']]
-            make_combined_pdf(tmp_png, photo_entry['path'], path)
+            tmp_pdf = os.path.join(get_save_dir(), '_tmp_combined.pdf')
+            make_combined_pdf(tmp_png, photo_entry['path'], tmp_pdf)
 
             if os.path.exists(tmp_png):
                 os.remove(tmp_png)
-            popup_msg("저장 완료", f"횡단면+현장사진 PDF 저장됨:\n{path}")
+
+            def _on_saved(result):
+                if result:
+                    popup_msg("저장 완료", f"PDF 저장됨: {result}")
+                # 임시 PDF 정리
+                if os.path.exists(tmp_pdf):
+                    os.remove(tmp_pdf)
+
+            save_with_picker(tmp_pdf, fname, 'application/pdf', _on_saved)
         except Exception as e:
             popup_msg("오류", str(e))
 
@@ -1822,7 +1944,6 @@ class ExportScreen(Screen):
         import datetime
         fname = (f'cross_section_compare_NO{no+1}_'
                  f'{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf')
-        path = os.path.join(get_save_dir(), fname)
         try:
             if not _init_matplotlib():
                 popup_msg("오류", f"matplotlib 로드 실패: {_mpl_error}")
@@ -1832,11 +1953,19 @@ class ExportScreen(Screen):
             render_figure(pts, no, to_file=tmp_png, dpi=200)
 
             photo_entry = sec['photos'][sec['photo_idx']]
-            make_combined_pdf(tmp_png, photo_entry['path'], path)
+            tmp_pdf = os.path.join(get_save_dir(), '_tmp_combined.pdf')
+            make_combined_pdf(tmp_png, photo_entry['path'], tmp_pdf)
 
             if os.path.exists(tmp_png):
                 os.remove(tmp_png)
-            popup_msg("저장 완료", f"횡단면+현장사진 PDF 저장됨:\n{path}")
+
+            def _on_saved(result):
+                if result:
+                    popup_msg("저장 완료", f"PDF 저장됨: {result}")
+                if os.path.exists(tmp_pdf):
+                    os.remove(tmp_pdf)
+
+            save_with_picker(tmp_pdf, fname, 'application/pdf', _on_saved)
         except Exception as e:
             popup_msg("오류", str(e))
 
