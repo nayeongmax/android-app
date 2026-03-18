@@ -339,6 +339,157 @@ def get_save_dir():
     return '.'
 
 
+_IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
+
+
+def show_image_gallery(on_selected, start_path=None):
+    """이미지 썸네일 갤러리 팝업을 열고, 선택 완료 시 on_selected(paths) 호출"""
+    selected = set()
+    if start_path is None:
+        start_path = get_save_dir()
+
+    content = BoxLayout(orientation='vertical', spacing=dp(4))
+
+    # 상단: 현재 경로 + 상위 폴더
+    nav_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(4),
+                        padding=(dp(4), 0))
+    btn_up = mk_btn("↑ 상위", h=dp(32), size_hint=(0.25, 1), font_size=sp(11))
+    path_lbl = mk_lbl("", font_size=sp(10), color=COLOR_HINT,
+                       halign='left', valign='middle', size_hint_x=0.75)
+    path_lbl.bind(size=path_lbl.setter('text_size'))
+    nav_row.add_widget(btn_up)
+    nav_row.add_widget(path_lbl)
+    content.add_widget(nav_row)
+
+    scroll = ScrollView()
+    grid = GridLayout(cols=3, spacing=dp(4), padding=dp(4),
+                      size_hint_y=None)
+    grid.bind(minimum_height=grid.setter('height'))
+    scroll.add_widget(grid)
+    content.add_widget(scroll)
+
+    sel_lbl = mk_lbl("선택: 0장", size_hint_y=None, height=dp(24),
+                     font_size=sp(11), color=COLOR_HINT,
+                     halign='center', valign='middle')
+    sel_lbl.bind(size=sel_lbl.setter('text_size'))
+    content.add_widget(sel_lbl)
+
+    btn_row = BoxLayout(size_hint_y=None, height=dp(50),
+                        spacing=dp(6), padding=dp(4))
+
+    p = Popup(title='사진 선택', content=content, size_hint=(0.96, 0.92),
+              title_color=COLOR_TEXT, background='',
+              background_color=(0.12, 0.14, 0.20, 0.97))
+
+    cur_path = [start_path]
+
+    def _toggle_select(filepath, thumb_box, *_):
+        if filepath in selected:
+            selected.discard(filepath)
+            thumb_box.canvas.after.clear()
+        else:
+            selected.add(filepath)
+            _draw_overlay(thumb_box)
+            thumb_box.bind(pos=lambda w, v: _draw_overlay(w),
+                           size=lambda w, v: _draw_overlay(w))
+        sel_lbl.text = f'선택: {len(selected)}장'
+
+    def _draw_overlay(box):
+        box.canvas.after.clear()
+        with box.canvas.after:
+            Color(0.2, 0.8, 0.2, 0.5)
+            Rectangle(pos=box.pos, size=box.size)
+
+    def _load_dir(dirpath):
+        grid.clear_widgets()
+        cur_path[0] = dirpath
+        path_lbl.text = dirpath
+        try:
+            entries = sorted(os.listdir(dirpath))
+        except PermissionError:
+            return
+        dirs = []
+        files = []
+        for e in entries:
+            full = os.path.join(dirpath, e)
+            if os.path.isdir(full) and not e.startswith('.'):
+                dirs.append((e, full))
+            elif os.path.isfile(full):
+                _, ext = os.path.splitext(e)
+                if ext.lower() in _IMAGE_EXTS:
+                    files.append((e, full))
+
+        thumb_h = dp(100) + dp(20)
+
+        for name, fullpath in dirs:
+            box = BoxLayout(orientation='vertical', size_hint_y=None,
+                            height=thumb_h)
+            flbl = mk_lbl("📁", font_size=sp(30), halign='center',
+                           valign='middle', size_hint_y=None, height=dp(100))
+            flbl.bind(size=flbl.setter('text_size'))
+            box.add_widget(flbl)
+            nlbl = mk_lbl(name, font_size=sp(9), halign='center',
+                          valign='top', size_hint_y=None, height=dp(20))
+            nlbl.text_size = (dp(100), dp(20))
+            nlbl.shorten = True
+            box.add_widget(nlbl)
+            box.bind(on_touch_down=lambda w, t, fp=fullpath:
+                     _on_dir(w, t, fp))
+            grid.add_widget(box)
+
+        for name, fullpath in files:
+            box = BoxLayout(orientation='vertical', size_hint_y=None,
+                            height=thumb_h)
+            img = KivyImage(source=fullpath, allow_stretch=True,
+                            keep_ratio=True, size_hint_y=None,
+                            height=dp(100))
+            box.add_widget(img)
+            nlbl = mk_lbl(name, font_size=sp(9), halign='center',
+                          valign='top', size_hint_y=None, height=dp(20))
+            nlbl.text_size = (dp(100), dp(20))
+            nlbl.shorten = True
+            box.add_widget(nlbl)
+            box.bind(on_touch_down=lambda w, t, fp=fullpath, b=box:
+                     _on_img(w, t, fp, b))
+            grid.add_widget(box)
+
+        if not dirs and not files:
+            grid.add_widget(mk_lbl("이미지 파일 없음", font_size=sp(12),
+                                   color=COLOR_HINT, halign='center',
+                                   size_hint_y=None, height=dp(60)))
+
+    def _on_dir(widget, touch, dirpath):
+        if widget.collide_point(*touch.pos):
+            _load_dir(dirpath)
+            return True
+        return False
+
+    def _on_img(widget, touch, filepath, box):
+        if widget.collide_point(*touch.pos):
+            _toggle_select(filepath, box)
+            return True
+        return False
+
+    btn_up.bind(on_press=lambda *_: _load_dir(os.path.dirname(cur_path[0]))
+                if os.path.dirname(cur_path[0]) != cur_path[0] else None)
+
+    def _sel_action(*_):
+        if selected:
+            on_selected(list(selected))
+        p.dismiss()
+
+    ok  = mk_btn("선택", clr=COLOR_GREEN, h=dp(44))
+    cxl = mk_btn("취소", h=dp(44))
+    ok.bind(on_press=_sel_action)
+    cxl.bind(on_press=p.dismiss)
+    btn_row.add_widget(ok)
+    btn_row.add_widget(cxl)
+    content.add_widget(btn_row)
+
+    _load_dir(cur_path[0])
+    p.open()
+
+
 # =====================================================
 # 데이터 처리
 # =====================================================
@@ -859,37 +1010,15 @@ class InputScreen(Screen):
         return False
 
     def _draw_show_filechooser(self):
-        """그리기 탭에서 현장사진 추가용 파일 선택기"""
-        content = BoxLayout(orientation='vertical', spacing=dp(4))
-        fc = FileChooserListView(
-            filters=['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.gif', '*.webp'],
-            multiselect=True,
-            path=get_save_dir(),
-        )
-        content.add_widget(fc)
-        btn_row = BoxLayout(size_hint_y=None, height=dp(50),
-                            spacing=dp(6), padding=dp(4))
-        p = Popup(title='사진 선택', content=content, size_hint=(0.96, 0.88),
-                  title_color=COLOR_TEXT, background='',
-                  background_color=(0.12, 0.14, 0.20, 0.97))
-        def sel(*_):
-            if fc.selection:
-                sec = AppData.sections[AppData.current_no]
-                for path in fc.selection:
-                    if os.path.exists(path):
-                        sec['photos'].append({'path': path, 'note': ''})
-                if sec['photos']:
-                    sec['photo_idx'] = max(0, len(sec['photos']) - len(fc.selection))
-                self._draw_refresh_photo()
-            p.dismiss()
-        ok  = mk_btn("선택", clr=COLOR_GREEN, h=dp(44))
-        cxl = mk_btn("취소", h=dp(44))
-        ok.bind(on_press=sel)
-        cxl.bind(on_press=p.dismiss)
-        btn_row.add_widget(ok)
-        btn_row.add_widget(cxl)
-        content.add_widget(btn_row)
-        p.open()
+        """그리기 탭에서 현장사진 추가 - 이미지 썸네일 갤러리"""
+        def _on_selected(paths):
+            sec = AppData.sections[AppData.current_no]
+            for path in paths:
+                sec['photos'].append({'path': path, 'note': ''})
+            if sec['photos']:
+                sec['photo_idx'] = max(0, len(sec['photos']) - len(paths))
+            self._draw_refresh_photo()
+        show_image_gallery(_on_selected)
 
     def _draw_photo_prev(self, *_):
         sec = AppData.sections[AppData.current_no]
@@ -1507,36 +1636,14 @@ class PhotoScreen(Screen):
         self._show_filechooser()
 
     def _show_filechooser(self):
-        content = BoxLayout(orientation='vertical', spacing=dp(4))
-        fc = FileChooserListView(
-            filters=['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.gif', '*.webp'],
-            multiselect=True,
-            path=get_save_dir(),
-        )
-        content.add_widget(fc)
-        btn_row = BoxLayout(size_hint_y=None, height=dp(50),
-                            spacing=dp(6), padding=dp(4))
-        p = Popup(title='사진 선택', content=content, size_hint=(0.96, 0.88),
-                  title_color=COLOR_TEXT, background='',
-                  background_color=(0.12, 0.14, 0.20, 0.97))
-        def sel(*_):
-            if fc.selection:
-                sec = self._sec()
-                for path in fc.selection:
-                    if os.path.exists(path):
-                        sec['photos'].append({'path': path, 'note': ''})
-                if sec['photos']:
-                    sec['photo_idx'] = max(0, len(sec['photos']) - len(fc.selection))
-                self._refresh()
-            p.dismiss()
-        ok  = mk_btn("선택", clr=COLOR_GREEN, h=dp(44))
-        cxl = mk_btn("취소", h=dp(44))
-        ok.bind(on_press=sel)
-        cxl.bind(on_press=p.dismiss)
-        btn_row.add_widget(ok)
-        btn_row.add_widget(cxl)
-        content.add_widget(btn_row)
-        p.open()
+        def _on_selected(paths):
+            sec = self._sec()
+            for path in paths:
+                sec['photos'].append({'path': path, 'note': ''})
+            if sec['photos']:
+                sec['photo_idx'] = max(0, len(sec['photos']) - len(paths))
+            self._refresh()
+        show_image_gallery(_on_selected)
 
 
 class ExportScreen(Screen):
