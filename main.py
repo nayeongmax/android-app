@@ -393,55 +393,69 @@ def show_image_gallery(on_selected, start_path=None):
 
 def _show_android_picker(on_selected):
     """Android 시스템 파일 선택기 (ACTION_GET_CONTENT) 사용"""
-    from jnius import autoclass
-    from android import activity as android_activity
+    try:
+        from jnius import autoclass
+        from android import activity as android_activity
 
-    Intent = autoclass('android.content.Intent')
+        Intent = autoclass('android.content.Intent')
+        Runnable = autoclass('java.lang.Runnable')
 
-    intent = Intent(Intent.ACTION_GET_CONTENT)
-    intent.setType('image/*')
-    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, True)
-    intent.addCategory(Intent.CATEGORY_OPENABLE)
-    chooser = Intent.createChooser(intent, '사진 선택')
+        intent = Intent(Intent.ACTION_GET_CONTENT)
+        intent.setType('image/*')
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, True)
+        intent.addCategory(Intent.CATEGORY_OPENABLE)
+        chooser = Intent.createChooser(intent, '사진 선택')
 
-    REQUEST_CODE = 9999
+        REQUEST_CODE = 9999
 
-    def _on_result(request_code, result_code, data):
-        android_activity.unbind(on_activity_result=_on_result)
-        try:
-            if request_code != REQUEST_CODE or data is None:
-                return
+        def _on_result(request_code, result_code, data):
+            android_activity.unbind(on_activity_result=_on_result)
+            try:
+                if request_code != REQUEST_CODE or data is None:
+                    return
 
-            Activity = autoclass('android.app.Activity')
-            if result_code != Activity.RESULT_OK:
-                return
+                Activity = autoclass('android.app.Activity')
+                if result_code != Activity.RESULT_OK:
+                    return
 
-            uris = []
-            clip = data.getClipData()
-            if clip:
-                for i in range(clip.getItemCount()):
-                    uris.append(clip.getItemAt(i).getUri())
-            else:
-                uri = data.getData()
-                if uri:
-                    uris.append(uri)
+                uris = []
+                clip = data.getClipData()
+                if clip:
+                    for i in range(clip.getItemCount()):
+                        uris.append(clip.getItemAt(i).getUri())
+                else:
+                    uri = data.getData()
+                    if uri:
+                        uris.append(uri)
 
-            paths = []
-            for uri in uris:
-                try:
-                    p = _uri_to_path(uri)
-                    if p:
-                        paths.append(p)
-                except Exception as e:
-                    Logger.warning(f'사진 변환 실패: {e}')
+                paths = []
+                for uri in uris:
+                    try:
+                        p = _uri_to_path(uri)
+                        if p:
+                            paths.append(p)
+                    except Exception as e:
+                        Logger.warning(f'사진 변환 실패: {e}')
 
-            if paths:
-                Clock.schedule_once(lambda dt: on_selected(paths), 0)
-        except Exception as e:
-            Logger.error(f'사진 선택 결과 처리 실패: {e}')
+                if paths:
+                    Clock.schedule_once(lambda dt: on_selected(paths), 0)
+            except Exception as e:
+                Logger.error(f'사진 선택 결과 처리 실패: {e}')
 
-    android_activity.bind(on_activity_result=_on_result)
-    mActivity.startActivityForResult(chooser, REQUEST_CODE)
+        android_activity.bind(on_activity_result=_on_result)
+
+        # UI 스레드에서 안전하게 Activity 실행
+        def _launch(*_):
+            try:
+                mActivity.startActivityForResult(chooser, REQUEST_CODE)
+            except Exception as e:
+                Logger.error(f'사진 선택기 실행 실패: {e}')
+                android_activity.unbind(on_activity_result=_on_result)
+
+        Clock.schedule_once(_launch, 0)
+    except Exception as e:
+        Logger.error(f'Android picker 초기화 실패: {e}')
+        popup_msg("오류", f"사진 선택기를 열 수 없습니다: {e}")
 
 
 def _uri_to_path(uri):
@@ -618,7 +632,15 @@ def save_with_picker(tmp_path, filename, mime_type, on_done=None):
                     lambda dt: popup_msg("오류", f"파일 저장 실패: {e}"), 0)
 
     android_activity.bind(on_activity_result=_on_result)
-    mActivity.startActivityForResult(intent, REQUEST_CODE)
+
+    def _launch(*_):
+        try:
+            mActivity.startActivityForResult(intent, REQUEST_CODE)
+        except Exception as e:
+            Logger.error(f'저장 선택기 실행 실패: {e}')
+            android_activity.unbind(on_activity_result=_on_result)
+
+    Clock.schedule_once(_launch, 0)
 
 
 def make_combined_pdf(cross_img_path, photo_path, save_path):
@@ -1206,7 +1228,8 @@ class InputScreen(Screen):
     def _draw_photo_box_touch(self, widget, touch):
         """현장사진 영역 터치 시 파일 선택기 열기"""
         if widget.collide_point(*touch.pos):
-            self._draw_show_filechooser()
+            # touch 이벤트 처리 완료 후 실행 (Android Activity 전환 충돌 방지)
+            Clock.schedule_once(lambda dt: self._draw_show_filechooser(), 0.1)
             return True
         return False
 
