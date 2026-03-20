@@ -304,90 +304,68 @@ function savePDF() {
     renderCrossSection(offCanvas, pts, no);
     const crossImgData = offCanvas.toDataURL('image/png');
 
-    // A3 landscape: 420 x 297 mm
-    const pdfW = 420, pdfH = 297;
     const scale = 3;
 
     const crossImg = new Image();
     crossImg.onload = () => {
         const renderPDF = (photoImg) => {
-            const pdfCanvas = document.createElement('canvas');
-            pdfCanvas.width = pdfW * scale;
-            pdfCanvas.height = pdfH * scale;
-            const ctx = pdfCanvas.getContext('2d');
+            // Both images use the same fixed size (same as cross-section)
+            const blockW = offCanvas.width;
+            const blockH = offCanvas.height;
+            const labelH = 50 * scale;
+            const gap = 20 * scale;
+            const pad = 30 * scale;
 
+            const pdfCanvas = document.createElement('canvas');
+            if (photoImg) {
+                // Two blocks stacked: label+cross + label+photo
+                pdfCanvas.width = blockW + pad * 2;
+                pdfCanvas.height = pad + labelH + blockH + gap + labelH + blockH + pad;
+            } else {
+                pdfCanvas.width = blockW + pad * 2;
+                pdfCanvas.height = pad + labelH + blockH + pad;
+            }
+
+            const ctx = pdfCanvas.getContext('2d');
             ctx.fillStyle = 'white';
             ctx.fillRect(0, 0, pdfCanvas.width, pdfCanvas.height);
 
-            const W = pdfCanvas.width;
-            const H = pdfCanvas.height;
-            const pad = W * 0.02;
+            const imgX = pad;
+            let curY = pad;
+
+            // Label: 횡단면도
+            ctx.fillStyle = '#333';
+            ctx.font = `bold ${18 * scale}px 'Noto Sans KR', sans-serif`;
+            ctx.textAlign = 'left';
+            ctx.fillText(`횡단면도 [NO.${no + 1}]`, imgX, curY + 18 * scale);
+            curY += labelH;
+
+            // Cross-section image (full size)
+            ctx.drawImage(crossImg, imgX, curY, blockW, blockH);
+            curY += blockH + gap;
 
             if (photoImg) {
-                // Split layout: cross-section top, photo bottom
-                const topH = H * 0.52;
-                const bottomH = H * 0.44;
-                const topY = pad;
-                const bottomY = topH + pad * 2;
+                // Label: 현장사진
+                ctx.fillText('현장사진', imgX, curY + 18 * scale);
+                curY += labelH;
 
-                // Draw divider line
-                ctx.strokeStyle = '#ccc';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(pad, topH + pad);
-                ctx.lineTo(W - pad, topH + pad);
-                ctx.stroke();
+                // Photo in same block size, centered with object-fit contain
+                ctx.fillStyle = '#f5f5f5';
+                ctx.fillRect(imgX, curY, blockW, blockH);
 
-                // Draw cross-section (top)
-                const crossRatio = crossImg.width / crossImg.height;
-                const availW = W - pad * 2;
-                let cw, ch;
-                if (crossRatio > availW / topH) {
-                    cw = availW;
-                    ch = cw / crossRatio;
-                } else {
-                    ch = topH;
-                    cw = ch * crossRatio;
-                }
-                const cx = (W - cw) / 2;
-                const cy = topY + (topH - ch) / 2;
-                ctx.drawImage(crossImg, cx, cy, cw, ch);
-
-                // Draw photo (bottom)
                 const photoRatio = photoImg.width / photoImg.height;
+                const blockRatio = blockW / blockH;
                 let pw, ph;
-                if (photoRatio > availW / bottomH) {
-                    pw = availW;
+                if (photoRatio > blockRatio) {
+                    pw = blockW;
                     ph = pw / photoRatio;
                 } else {
-                    ph = bottomH;
+                    ph = blockH;
                     pw = ph * photoRatio;
                 }
-                const px = (W - pw) / 2;
-                const py = bottomY + (bottomH - ph) / 2;
+                const px = imgX + (blockW - pw) / 2;
+                const py = curY + (blockH - ph) / 2;
                 ctx.drawImage(photoImg, px, py, pw, ph);
-
-                // Labels
-                ctx.fillStyle = '#333';
-                ctx.font = `bold ${14 * scale}px 'Noto Sans KR', sans-serif`;
-                ctx.textAlign = 'left';
-                ctx.fillText(`횡단면도 [NO.${no + 1}]`, pad, topY + 14 * scale);
-                ctx.fillText('현장사진', pad, bottomY + 14 * scale);
-            } else {
-                // No photo: full-page cross-section (original behavior)
-                const imgRatio = crossImg.width / crossImg.height;
-                const canvasRatio = W / H;
-                let dw, dh, dx, dy;
-                if (imgRatio > canvasRatio) {
-                    dw = W * 0.95;
-                    dh = dw / imgRatio;
-                } else {
-                    dh = H * 0.95;
-                    dw = dh * imgRatio;
-                }
-                dx = (W - dw) / 2;
-                dy = (H - dh) / 2;
-                ctx.drawImage(crossImg, dx, dy, dw, dh);
             }
 
             pdfCanvas.toBlob(blob => {
@@ -397,7 +375,7 @@ function savePDF() {
                 a.download = `cross_section_NO${no + 1}_${timestamp()}.png`;
                 a.click();
                 URL.revokeObjectURL(url);
-                showToast(photoImg ? '횡단면도 + 현장사진 저장 완료! (A3)' : '고해상도 이미지 저장 완료! (A3 크기)');
+                showToast(photoImg ? '횡단면도 + 현장사진 저장 완료!' : '횡단면도 저장 완료!');
             }, 'image/png');
         };
 
