@@ -41,7 +41,6 @@ function switchNo(idx) {
     });
     document.getElementById('inputHeader').textContent = `NO.${idx + 1} 측점 데이터`;
     refreshTable();
-    refreshPhoto();
     refreshDrawPhoto();
 }
 
@@ -204,85 +203,7 @@ function toggleUnit() {
     document.getElementById('unitBtn').textContent = appData.unit;
 }
 
-// ==================== 사진 관리 ====================
-function addPhoto() {
-    document.getElementById('photoFileInput').click();
-}
-
-function handlePhotoFiles(event) {
-    const files = event.target.files;
-    if (!files.length) return;
-
-    const sec = appData.sections[appData.currentNo];
-    for (const file of files) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            sec.photos.push({dataUrl: e.target.result, name: file.name, note: ''});
-            if (sec.photos.length === 1) sec.photoIdx = 0;
-            refreshPhoto();
-        };
-        reader.readAsDataURL(file);
-    }
-    event.target.value = '';
-}
-
-function refreshPhoto() {
-    const sec = appData.sections[appData.currentNo];
-    const counter = document.getElementById('photoCounter');
-    const placeholder = document.getElementById('photoPlaceholder');
-    const img = document.getElementById('photoImage');
-    const memo = document.getElementById('photoMemo');
-
-    if (!sec.photos.length) {
-        counter.textContent = '사진 없음';
-        placeholder.style.display = 'block';
-        img.style.display = 'none';
-        memo.value = '';
-        return;
-    }
-
-    const idx = sec.photoIdx;
-    const entry = sec.photos[idx];
-    counter.textContent = `${idx + 1}/${sec.photos.length}  ${entry.name}`;
-    placeholder.style.display = 'none';
-    img.style.display = 'block';
-    img.src = entry.dataUrl;
-    memo.value = entry.note || '';
-}
-
-function prevPhoto() {
-    const sec = appData.sections[appData.currentNo];
-    if (!sec.photos.length) return;
-    sec.photoIdx = (sec.photoIdx - 1 + sec.photos.length) % sec.photos.length;
-    refreshPhoto();
-}
-
-function nextPhoto() {
-    const sec = appData.sections[appData.currentNo];
-    if (!sec.photos.length) return;
-    sec.photoIdx = (sec.photoIdx + 1) % sec.photos.length;
-    refreshPhoto();
-}
-
-function deletePhoto() {
-    const sec = appData.sections[appData.currentNo];
-    if (!sec.photos.length) return;
-    showConfirm('현재 사진을 삭제하시겠습니까?', () => {
-        sec.photos.splice(sec.photoIdx, 1);
-        sec.photoIdx = Math.max(0, Math.min(sec.photoIdx, sec.photos.length - 1));
-        refreshPhoto();
-    });
-}
-
-function saveMemo() {
-    const sec = appData.sections[appData.currentNo];
-    if (sec.photos.length) {
-        sec.photos[sec.photoIdx].note = document.getElementById('photoMemo').value;
-        showToast('메모가 저장되었습니다.');
-    }
-}
-
-// ==================== 그리기탭 현장사진 ====================
+// ==================== 현장사진 관리 ====================
 function addDrawPhoto() {
     document.getElementById('drawPhotoFileInput').click();
 }
@@ -297,7 +218,6 @@ function handleDrawPhotoFiles(event) {
             sec.photos.push({dataUrl: e.target.result, name: file.name, note: ''});
             if (sec.photos.length === 1) sec.photoIdx = 0;
             refreshDrawPhoto();
-            refreshPhoto();
         };
         reader.readAsDataURL(file);
     }
@@ -330,7 +250,6 @@ function prevDrawPhoto() {
     if (!sec.photos.length) return;
     sec.photoIdx = (sec.photoIdx - 1 + sec.photos.length) % sec.photos.length;
     refreshDrawPhoto();
-    refreshPhoto();
 }
 
 function nextDrawPhoto() {
@@ -338,7 +257,6 @@ function nextDrawPhoto() {
     if (!sec.photos.length) return;
     sec.photoIdx = (sec.photoIdx + 1) % sec.photos.length;
     refreshDrawPhoto();
-    refreshPhoto();
 }
 
 function deleteDrawPhoto() {
@@ -348,7 +266,6 @@ function deleteDrawPhoto() {
         sec.photos.splice(sec.photoIdx, 1);
         sec.photoIdx = Math.max(0, Math.min(sec.photoIdx, sec.photos.length - 1));
         refreshDrawPhoto();
-        refreshPhoto();
     });
 }
 
