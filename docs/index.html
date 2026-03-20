@@ -24,8 +24,6 @@
     <div class="sub-tabs">
         <button class="sub-tab active" data-tab="input" onclick="switchSubTab('input')">입력</button>
         <button class="sub-tab" data-tab="draw" onclick="switchSubTab('draw')">그리기</button>
-        <button class="sub-tab" data-tab="photo" onclick="switchSubTab('photo')">사진</button>
-        <button class="sub-tab" data-tab="export" onclick="switchSubTab('export')">저장</button>
     </div>
 
     <!-- Input Tab -->
@@ -93,6 +91,9 @@
             <button class="btn btn-success" onclick="drawCrossSection()">횡단면도 그리기</button>
             <button class="btn btn-primary" onclick="savePNG()">PNG 저장</button>
             <button class="btn btn-pdf" onclick="savePDF()">PDF 저장</button>
+            <button class="btn btn-secondary" onclick="exportCSV()">CSV↓</button>
+            <button class="btn btn-secondary" onclick="importCSV()">CSV↑</button>
+            <input type="file" id="csvFileInput" accept=".csv,.txt" style="display:none;" onchange="handleCSVFile(event)">
         </div>
 
         <!-- Split View: Cross-section + Photo -->
@@ -125,56 +126,6 @@
         </div>
 
         <div class="draw-status" id="drawStatus"></div>
-    </div>
-
-    <!-- Photo Tab -->
-    <div class="tab-content" id="tab-photo">
-        <div class="photo-header">
-            <span id="photoCounter">사진 없음</span>
-        </div>
-
-        <div class="photo-container" id="photoContainer">
-            <div class="photo-placeholder" id="photoPlaceholder">
-                사진을 추가하려면<br>아래 버튼을 누르세요
-            </div>
-            <img id="photoImage" class="photo-img" style="display:none;">
-        </div>
-
-        <div class="photo-memo">
-            <input type="text" id="photoMemo" placeholder="사진 메모" class="form-input">
-            <button class="btn btn-sm btn-primary" onclick="saveMemo()">저장</button>
-        </div>
-
-        <div class="photo-nav">
-            <button class="btn btn-primary" onclick="prevPhoto()">◀ 이전</button>
-            <button class="btn btn-primary" onclick="nextPhoto()">다음 ▶</button>
-            <button class="btn btn-danger" onclick="deletePhoto()">삭제</button>
-        </div>
-
-        <div class="photo-actions">
-            <button class="btn btn-success btn-lg" onclick="addPhoto()">사진 추가</button>
-            <input type="file" id="photoFileInput" accept="image/*" multiple style="display:none;" onchange="handlePhotoFiles(event)">
-        </div>
-    </div>
-
-    <!-- Export Tab -->
-    <div class="tab-content" id="tab-export">
-        <h2 class="export-title">저장 / 내보내기</h2>
-
-        <div class="export-form">
-            <div class="export-row">
-                <label>도면명:</label>
-                <input type="text" id="titleInput" value="횡단면도" class="form-input" oninput="appData.titleText = this.value">
-            </div>
-        </div>
-
-        <div class="export-buttons">
-            <button class="btn btn-primary btn-lg" onclick="savePNG()">PNG 이미지 저장</button>
-            <button class="btn btn-pdf btn-lg" onclick="savePDF()">PDF 저장 (A3)</button>
-            <button class="btn btn-success btn-lg" onclick="exportCSV()">CSV 내보내기</button>
-            <button class="btn btn-secondary btn-lg" onclick="importCSV()">CSV 가져오기</button>
-            <input type="file" id="csvFileInput" accept=".csv,.txt" style="display:none;" onchange="handleCSVFile(event)">
-        </div>
     </div>
 
     <!-- Toast -->
