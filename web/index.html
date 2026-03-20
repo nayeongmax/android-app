@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>횡단면도 작성 프로그램</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="app-header">
+        <h1>횡단면도 작성 프로그램</h1>
+        <p class="subtitle">현장 횡단면 실측 도면 작성 도구</p>
+    </header>
+
+    <!-- NO Tab Bar -->
+    <div class="no-tabs">
+        <div class="no-tabs-inner" id="noTabs"></div>
+    </div>
+
+    <!-- Sub Tab Bar -->
+    <div class="sub-tabs">
+        <button class="sub-tab active" data-tab="input" onclick="switchSubTab('input')">입력</button>
+        <button class="sub-tab" data-tab="draw" onclick="switchSubTab('draw')">그리기</button>
+        <button class="sub-tab" data-tab="photo" onclick="switchSubTab('photo')">사진</button>
+        <button class="sub-tab" data-tab="export" onclick="switchSubTab('export')">저장</button>
+    </div>
+
+    <!-- Input Tab -->
+    <div class="tab-content active" id="tab-input">
+        <div class="section-header">
+            <span id="inputHeader">NO.1 측점 데이터</span>
+            <button class="btn btn-sm" onclick="loadDefaults()">기본값 로드</button>
+        </div>
+
+        <!-- Data Table -->
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>측점명</th>
+                        <th>DL(mm)</th>
+                        <th>DH(mm)</th>
+                        <th>비고</th>
+                    </tr>
+                </thead>
+                <tbody id="dataTableBody"></tbody>
+            </table>
+        </div>
+
+        <!-- Move Buttons -->
+        <div class="move-btns">
+            <button class="btn btn-secondary btn-sm" onclick="moveRow(-1)">▲ UP</button>
+            <button class="btn btn-secondary btn-sm" onclick="moveRow(1)">▼ DOWN</button>
+        </div>
+
+        <!-- Input Form -->
+        <div class="input-form">
+            <div class="form-grid">
+                <input type="text" id="inpName" placeholder="측점명" class="form-input">
+                <input type="number" id="inpDL" placeholder="DL (mm)" class="form-input" step="any">
+                <input type="number" id="inpDH" placeholder="DH (mm)" class="form-input" step="any">
+                <input type="text" id="inpNote" placeholder="비고" class="form-input">
+            </div>
+
+            <!-- Preset Names -->
+            <div class="preset-names" id="presetNames"></div>
+
+            <!-- Action Buttons -->
+            <div class="action-btns">
+                <button class="btn btn-success" onclick="addRow()">추가</button>
+                <button class="btn btn-primary" onclick="editRow()">수정</button>
+                <button class="btn btn-danger" onclick="deleteRow()">삭제</button>
+                <button class="btn btn-danger-dark" onclick="clearAll()">전체삭제</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Draw Tab -->
+    <div class="tab-content" id="tab-draw">
+        <!-- Draw Options -->
+        <div class="draw-options">
+            <button class="opt-btn active" id="optLabels" onclick="toggleOpt('labels')">측점명</button>
+            <button class="opt-btn active" id="optDims" onclick="toggleOpt('dims')">치수선</button>
+            <button class="opt-btn active" id="optGrid" onclick="toggleOpt('grid')">격자</button>
+            <button class="opt-btn active" id="optHatch" onclick="toggleOpt('hatch')">해치</button>
+            <button class="opt-btn unit-btn" id="unitBtn" onclick="toggleUnit()">mm</button>
+        </div>
+
+        <div class="draw-actions">
+            <button class="btn btn-success" onclick="drawCrossSection()">횡단면도 그리기</button>
+            <button class="btn btn-primary" onclick="savePNG()">PNG 저장</button>
+            <button class="btn btn-pdf" onclick="savePDF()">PDF 저장</button>
+        </div>
+
+        <!-- Canvas Area -->
+        <div class="canvas-container" id="canvasContainer">
+            <canvas id="drawCanvas" width="1200" height="900"></canvas>
+            <div class="canvas-placeholder" id="canvasPlaceholder">
+                횡단면도를 그리려면<br>[횡단면도 그리기]를 누르세요
+            </div>
+        </div>
+
+        <div class="draw-status" id="drawStatus"></div>
+    </div>
+
+    <!-- Photo Tab -->
+    <div class="tab-content" id="tab-photo">
+        <div class="photo-header">
+            <span id="photoCounter">사진 없음</span>
+        </div>
+
+        <div class="photo-container" id="photoContainer">
+            <div class="photo-placeholder" id="photoPlaceholder">
+                사진을 추가하려면<br>아래 버튼을 누르세요
+            </div>
+            <img id="photoImage" class="photo-img" style="display:none;">
+        </div>
+
+        <div class="photo-memo">
+            <input type="text" id="photoMemo" placeholder="사진 메모" class="form-input">
+            <button class="btn btn-sm btn-primary" onclick="saveMemo()">저장</button>
+        </div>
+
+        <div class="photo-nav">
+            <button class="btn btn-primary" onclick="prevPhoto()">◀ 이전</button>
+            <button class="btn btn-primary" onclick="nextPhoto()">다음 ▶</button>
+            <button class="btn btn-danger" onclick="deletePhoto()">삭제</button>
+        </div>
+
+        <div class="photo-actions">
+            <button class="btn btn-success btn-lg" onclick="addPhoto()">사진 추가</button>
+            <input type="file" id="photoFileInput" accept="image/*" multiple style="display:none;" onchange="handlePhotoFiles(event)">
+        </div>
+    </div>
+
+    <!-- Export Tab -->
+    <div class="tab-content" id="tab-export">
+        <h2 class="export-title">저장 / 내보내기</h2>
+
+        <div class="export-form">
+            <div class="export-row">
+                <label>도면명:</label>
+                <input type="text" id="titleInput" value="횡단면도" class="form-input" oninput="appData.titleText = this.value">
+            </div>
+        </div>
+
+        <div class="export-buttons">
+            <button class="btn btn-primary btn-lg" onclick="savePNG()">PNG 이미지 저장</button>
+            <button class="btn btn-pdf btn-lg" onclick="savePDF()">PDF 저장 (A3)</button>
+            <button class="btn btn-success btn-lg" onclick="exportCSV()">CSV 내보내기</button>
+            <button class="btn btn-secondary btn-lg" onclick="importCSV()">CSV 가져오기</button>
+            <input type="file" id="csvFileInput" accept=".csv,.txt" style="display:none;" onchange="handleCSVFile(event)">
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <!-- Confirm Modal -->
+    <div class="modal-overlay" id="modalOverlay" style="display:none;">
+        <div class="modal">
+            <h3 id="modalTitle"></h3>
+            <p id="modalMsg"></p>
+            <div class="modal-btns">
+                <button class="btn btn-danger" id="modalYes">예</button>
+                <button class="btn btn-secondary" id="modalNo">아니오</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="render.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
