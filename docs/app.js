@@ -328,20 +328,8 @@ function savePDF() {
             ctx.drawImage(crossImg, 0, 0, blockW, blockH);
 
             if (photoImg) {
-                // Photo (bottom, same size, no margin)
-                const photoRatio = photoImg.width / photoImg.height;
-                const blockRatio = blockW / blockH;
-                let pw, ph;
-                if (photoRatio > blockRatio) {
-                    pw = blockW;
-                    ph = pw / photoRatio;
-                } else {
-                    ph = blockH;
-                    pw = ph * photoRatio;
-                }
-                const px = (blockW - pw) / 2;
-                const py = blockH + (blockH - ph) / 2;
-                ctx.drawImage(photoImg, px, py, pw, ph);
+                // Photo (bottom, fill entire block)
+                ctx.drawImage(photoImg, 0, blockH, blockW, blockH);
             }
 
             pdfCanvas.toBlob(blob => {
