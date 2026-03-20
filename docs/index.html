@@ -24,7 +24,6 @@
     <div class="sub-tabs">
         <button class="sub-tab active" data-tab="input" onclick="switchSubTab('input')">입력</button>
         <button class="sub-tab" data-tab="draw" onclick="switchSubTab('draw')">그리기</button>
-        <button class="sub-tab" data-tab="export" onclick="switchSubTab('export')">저장</button>
     </div>
 
     <!-- Input Tab -->
@@ -92,6 +91,9 @@
             <button class="btn btn-success" onclick="drawCrossSection()">횡단면도 그리기</button>
             <button class="btn btn-primary" onclick="savePNG()">PNG 저장</button>
             <button class="btn btn-pdf" onclick="savePDF()">PDF 저장</button>
+            <button class="btn btn-secondary" onclick="exportCSV()">CSV↓</button>
+            <button class="btn btn-secondary" onclick="importCSV()">CSV↑</button>
+            <input type="file" id="csvFileInput" accept=".csv,.txt" style="display:none;" onchange="handleCSVFile(event)">
         </div>
 
         <!-- Split View: Cross-section + Photo -->
@@ -124,26 +126,6 @@
         </div>
 
         <div class="draw-status" id="drawStatus"></div>
-    </div>
-
-    <!-- Export Tab -->
-    <div class="tab-content" id="tab-export">
-        <h2 class="export-title">저장 / 내보내기</h2>
-
-        <div class="export-form">
-            <div class="export-row">
-                <label>도면명:</label>
-                <input type="text" id="titleInput" value="횡단면도" class="form-input" oninput="appData.titleText = this.value">
-            </div>
-        </div>
-
-        <div class="export-buttons">
-            <button class="btn btn-primary btn-lg" onclick="savePNG()">PNG 이미지 저장</button>
-            <button class="btn btn-pdf btn-lg" onclick="savePDF()">PDF 저장 (A3)</button>
-            <button class="btn btn-success btn-lg" onclick="exportCSV()">CSV 내보내기</button>
-            <button class="btn btn-secondary btn-lg" onclick="importCSV()">CSV 가져오기</button>
-            <input type="file" id="csvFileInput" accept=".csv,.txt" style="display:none;" onchange="handleCSVFile(event)">
-        </div>
     </div>
 
     <!-- Toast -->

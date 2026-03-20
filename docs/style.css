@@ -448,43 +448,6 @@ body {
     min-height: 20px;
 }
 
-/* Export Tab */
-.export-title {
-    text-align: center;
-    font-size: 20px;
-    margin-bottom: 16px;
-    padding: 12px;
-}
-
-.export-form {
-    background: var(--bg-panel);
-    border-radius: var(--radius);
-    padding: 16px;
-    margin-bottom: 16px;
-}
-
-.export-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.export-row label {
-    font-size: 14px;
-    white-space: nowrap;
-    min-width: 60px;
-}
-
-.export-row .form-input {
-    flex: 1;
-}
-
-.export-buttons {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
 /* Toast */
 .toast {
     position: fixed;

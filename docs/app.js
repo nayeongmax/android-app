@@ -52,9 +52,6 @@ function switchSubTab(tab) {
     document.querySelectorAll('.tab-content').forEach(el => {
         el.classList.toggle('active', el.id === `tab-${tab}`);
     });
-    if (tab === 'export') {
-        document.getElementById('titleInput').value = appData.titleText;
-    }
 }
 
 // ==================== 테이블 관리 ====================
