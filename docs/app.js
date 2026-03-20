@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initNoTabs();
     initPresetNames();
     refreshTable();
+    refreshDrawPhoto();
 });
 
 function initNoTabs() {
@@ -41,6 +42,7 @@ function switchNo(idx) {
     document.getElementById('inputHeader').textContent = `NO.${idx + 1} 측점 데이터`;
     refreshTable();
     refreshPhoto();
+    refreshDrawPhoto();
 }
 
 // ==================== 서브탭 전환 ====================
@@ -280,6 +282,76 @@ function saveMemo() {
     }
 }
 
+// ==================== 그리기탭 현장사진 ====================
+function addDrawPhoto() {
+    document.getElementById('drawPhotoFileInput').click();
+}
+
+function handleDrawPhotoFiles(event) {
+    const files = event.target.files;
+    if (!files.length) return;
+    const sec = appData.sections[appData.currentNo];
+    for (const file of files) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            sec.photos.push({dataUrl: e.target.result, name: file.name, note: ''});
+            if (sec.photos.length === 1) sec.photoIdx = 0;
+            refreshDrawPhoto();
+            refreshPhoto();
+        };
+        reader.readAsDataURL(file);
+    }
+    event.target.value = '';
+}
+
+function refreshDrawPhoto() {
+    const sec = appData.sections[appData.currentNo];
+    const counter = document.getElementById('drawPhotoCounter');
+    const placeholder = document.getElementById('drawPhotoPlaceholder');
+    const img = document.getElementById('drawPhotoImage');
+
+    if (!sec.photos.length) {
+        counter.textContent = '현장사진 없음';
+        placeholder.style.display = 'block';
+        img.style.display = 'none';
+        return;
+    }
+
+    const idx = sec.photoIdx;
+    const entry = sec.photos[idx];
+    counter.textContent = `현장사진 ${idx + 1}/${sec.photos.length}`;
+    placeholder.style.display = 'none';
+    img.style.display = 'block';
+    img.src = entry.dataUrl;
+}
+
+function prevDrawPhoto() {
+    const sec = appData.sections[appData.currentNo];
+    if (!sec.photos.length) return;
+    sec.photoIdx = (sec.photoIdx - 1 + sec.photos.length) % sec.photos.length;
+    refreshDrawPhoto();
+    refreshPhoto();
+}
+
+function nextDrawPhoto() {
+    const sec = appData.sections[appData.currentNo];
+    if (!sec.photos.length) return;
+    sec.photoIdx = (sec.photoIdx + 1) % sec.photos.length;
+    refreshDrawPhoto();
+    refreshPhoto();
+}
+
+function deleteDrawPhoto() {
+    const sec = appData.sections[appData.currentNo];
+    if (!sec.photos.length) return;
+    showConfirm('현재 사진을 삭제하시겠습니까?', () => {
+        sec.photos.splice(sec.photoIdx, 1);
+        sec.photoIdx = Math.max(0, Math.min(sec.photoIdx, sec.photos.length - 1));
+        refreshDrawPhoto();
+        refreshPhoto();
+    });
+}
+
 // ==================== 저장/내보내기 ====================
 function savePNG() {
     const no = appData.currentNo;
@@ -311,53 +383,119 @@ function savePDF() {
         return;
     }
 
+    const sec = appData.sections[no];
+    const hasPhoto = sec.photos.length > 0;
+
     const offCanvas = document.createElement('canvas');
     renderCrossSection(offCanvas, pts, no);
-
-    const imgData = offCanvas.toDataURL('image/png');
+    const crossImgData = offCanvas.toDataURL('image/png');
 
     // A3 landscape: 420 x 297 mm
     const pdfW = 420, pdfH = 297;
+    const scale = 3;
 
-    // Build PDF manually (simplified PDF structure)
-    const imgObj = new Image();
-    imgObj.onload = () => {
-        // Use canvas to create a proper A3-sized image
-        const pdfCanvas = document.createElement('canvas');
-        const scale = 3; // 3x for quality
-        pdfCanvas.width = pdfW * scale;
-        pdfCanvas.height = pdfH * scale;
-        const ctx = pdfCanvas.getContext('2d');
+    const crossImg = new Image();
+    crossImg.onload = () => {
+        const renderPDF = (photoImg) => {
+            const pdfCanvas = document.createElement('canvas');
+            pdfCanvas.width = pdfW * scale;
+            pdfCanvas.height = pdfH * scale;
+            const ctx = pdfCanvas.getContext('2d');
 
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, pdfCanvas.width, pdfCanvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, pdfCanvas.width, pdfCanvas.height);
 
-        // Fit the cross-section image
-        const imgRatio = imgObj.width / imgObj.height;
-        const canvasRatio = pdfCanvas.width / pdfCanvas.height;
-        let dw, dh, dx, dy;
-        if (imgRatio > canvasRatio) {
-            dw = pdfCanvas.width * 0.95;
-            dh = dw / imgRatio;
+            const W = pdfCanvas.width;
+            const H = pdfCanvas.height;
+            const pad = W * 0.02;
+
+            if (photoImg) {
+                // Split layout: cross-section top, photo bottom
+                const topH = H * 0.52;
+                const bottomH = H * 0.44;
+                const topY = pad;
+                const bottomY = topH + pad * 2;
+
+                // Draw divider line
+                ctx.strokeStyle = '#ccc';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(pad, topH + pad);
+                ctx.lineTo(W - pad, topH + pad);
+                ctx.stroke();
+
+                // Draw cross-section (top)
+                const crossRatio = crossImg.width / crossImg.height;
+                const availW = W - pad * 2;
+                let cw, ch;
+                if (crossRatio > availW / topH) {
+                    cw = availW;
+                    ch = cw / crossRatio;
+                } else {
+                    ch = topH;
+                    cw = ch * crossRatio;
+                }
+                const cx = (W - cw) / 2;
+                const cy = topY + (topH - ch) / 2;
+                ctx.drawImage(crossImg, cx, cy, cw, ch);
+
+                // Draw photo (bottom)
+                const photoRatio = photoImg.width / photoImg.height;
+                let pw, ph;
+                if (photoRatio > availW / bottomH) {
+                    pw = availW;
+                    ph = pw / photoRatio;
+                } else {
+                    ph = bottomH;
+                    pw = ph * photoRatio;
+                }
+                const px = (W - pw) / 2;
+                const py = bottomY + (bottomH - ph) / 2;
+                ctx.drawImage(photoImg, px, py, pw, ph);
+
+                // Labels
+                ctx.fillStyle = '#333';
+                ctx.font = `bold ${14 * scale}px 'Noto Sans KR', sans-serif`;
+                ctx.textAlign = 'left';
+                ctx.fillText(`횡단면도 [NO.${no + 1}]`, pad, topY + 14 * scale);
+                ctx.fillText('현장사진', pad, bottomY + 14 * scale);
+            } else {
+                // No photo: full-page cross-section (original behavior)
+                const imgRatio = crossImg.width / crossImg.height;
+                const canvasRatio = W / H;
+                let dw, dh, dx, dy;
+                if (imgRatio > canvasRatio) {
+                    dw = W * 0.95;
+                    dh = dw / imgRatio;
+                } else {
+                    dh = H * 0.95;
+                    dw = dh * imgRatio;
+                }
+                dx = (W - dw) / 2;
+                dy = (H - dh) / 2;
+                ctx.drawImage(crossImg, dx, dy, dw, dh);
+            }
+
+            pdfCanvas.toBlob(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `cross_section_NO${no + 1}_${timestamp()}.png`;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast(photoImg ? '횡단면도 + 현장사진 저장 완료! (A3)' : '고해상도 이미지 저장 완료! (A3 크기)');
+            }, 'image/png');
+        };
+
+        if (hasPhoto) {
+            const photoImg = new Image();
+            photoImg.onload = () => renderPDF(photoImg);
+            photoImg.src = sec.photos[sec.photoIdx].dataUrl;
         } else {
-            dh = pdfCanvas.height * 0.95;
-            dw = dh * imgRatio;
+            renderPDF(null);
         }
-        dx = (pdfCanvas.width - dw) / 2;
-        dy = (pdfCanvas.height - dh) / 2;
-        ctx.drawImage(imgObj, dx, dy, dw, dh);
-
-        pdfCanvas.toBlob(blob => {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `cross_section_NO${no + 1}_${timestamp()}.png`;
-            a.click();
-            URL.revokeObjectURL(url);
-            showToast('고해상도 이미지 저장 완료! (A3 크기)');
-        }, 'image/png');
     };
-    imgObj.src = imgData;
+    crossImg.src = crossImgData;
 }
 
 function exportCSV() {

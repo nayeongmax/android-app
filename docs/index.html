@@ -95,11 +95,32 @@
             <button class="btn btn-pdf" onclick="savePDF()">PDF 저장</button>
         </div>
 
-        <!-- Canvas Area -->
-        <div class="canvas-container" id="canvasContainer">
-            <canvas id="drawCanvas" width="1200" height="900"></canvas>
-            <div class="canvas-placeholder" id="canvasPlaceholder">
-                횡단면도를 그리려면<br>[횡단면도 그리기]를 누르세요
+        <!-- Split View: Cross-section + Photo -->
+        <div class="draw-split-view">
+            <!-- Canvas Area (Top) -->
+            <div class="canvas-container" id="canvasContainer">
+                <canvas id="drawCanvas" width="1200" height="900"></canvas>
+                <div class="canvas-placeholder" id="canvasPlaceholder">
+                    횡단면도를 그리려면<br>[횡단면도 그리기]를 누르세요
+                </div>
+            </div>
+
+            <!-- Site Photo Area (Bottom) -->
+            <div class="draw-photo-section">
+                <div class="draw-photo-bar">
+                    <button class="btn btn-sm btn-secondary" onclick="prevDrawPhoto()">◀</button>
+                    <span id="drawPhotoCounter" class="draw-photo-counter">현장사진 없음</span>
+                    <button class="btn btn-sm btn-secondary" onclick="nextDrawPhoto()">▶</button>
+                    <button class="btn btn-sm btn-success" onclick="addDrawPhoto()">사진추가</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteDrawPhoto()">삭제</button>
+                    <input type="file" id="drawPhotoFileInput" accept="image/*" multiple style="display:none;" onchange="handleDrawPhotoFiles(event)">
+                </div>
+                <div class="draw-photo-container" id="drawPhotoContainer">
+                    <div class="draw-photo-placeholder" id="drawPhotoPlaceholder">
+                        현장사진을 추가하면 횡단면도와 함께 비교할 수 있습니다
+                    </div>
+                    <img id="drawPhotoImage" class="draw-photo-img" style="display:none;">
+                </div>
             </div>
         </div>
 
