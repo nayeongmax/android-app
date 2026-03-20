@@ -309,50 +309,26 @@ function savePDF() {
     const crossImg = new Image();
     crossImg.onload = () => {
         const renderPDF = (photoImg) => {
-            // Both images use the same fixed size (same as cross-section)
             const blockW = offCanvas.width;
             const blockH = offCanvas.height;
-            const labelH = 50 * scale;
-            const gap = 20 * scale;
-            const pad = 30 * scale;
 
             const pdfCanvas = document.createElement('canvas');
+            pdfCanvas.width = blockW;
             if (photoImg) {
-                // Two blocks stacked: label+cross + label+photo
-                pdfCanvas.width = blockW + pad * 2;
-                pdfCanvas.height = pad + labelH + blockH + gap + labelH + blockH + pad;
+                pdfCanvas.height = blockH * 2;
             } else {
-                pdfCanvas.width = blockW + pad * 2;
-                pdfCanvas.height = pad + labelH + blockH + pad;
+                pdfCanvas.height = blockH;
             }
 
             const ctx = pdfCanvas.getContext('2d');
             ctx.fillStyle = 'white';
             ctx.fillRect(0, 0, pdfCanvas.width, pdfCanvas.height);
 
-            const imgX = pad;
-            let curY = pad;
-
-            // Label: 횡단면도
-            ctx.fillStyle = '#333';
-            ctx.font = `bold ${18 * scale}px 'Noto Sans KR', sans-serif`;
-            ctx.textAlign = 'left';
-            ctx.fillText(`횡단면도 [NO.${no + 1}]`, imgX, curY + 18 * scale);
-            curY += labelH;
-
-            // Cross-section image (full size)
-            ctx.drawImage(crossImg, imgX, curY, blockW, blockH);
-            curY += blockH + gap;
+            // Cross-section (top, full bleed)
+            ctx.drawImage(crossImg, 0, 0, blockW, blockH);
 
             if (photoImg) {
-                // Label: 현장사진
-                ctx.fillText('현장사진', imgX, curY + 18 * scale);
-                curY += labelH;
-
-                // Photo in same block size, centered with object-fit contain
-                ctx.fillStyle = '#f5f5f5';
-                ctx.fillRect(imgX, curY, blockW, blockH);
-
+                // Photo (bottom, same size, no margin)
                 const photoRatio = photoImg.width / photoImg.height;
                 const blockRatio = blockW / blockH;
                 let pw, ph;
@@ -363,8 +339,8 @@ function savePDF() {
                     ph = blockH;
                     pw = ph * photoRatio;
                 }
-                const px = imgX + (blockW - pw) / 2;
-                const py = curY + (blockH - ph) / 2;
+                const px = (blockW - pw) / 2;
+                const py = blockH + (blockH - ph) / 2;
                 ctx.drawImage(photoImg, px, py, pw, ph);
             }
 
