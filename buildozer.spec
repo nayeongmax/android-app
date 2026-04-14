@@ -20,7 +20,7 @@ requirements = python3,kivy==2.3.0,plyer
 orientation = portrait
 
 # 권한
-android.permissions = VIBRATE
+android.permissions = VIBRATE,READ_MEDIA_IMAGES,READ_EXTERNAL_STORAGE
 
 # Android 설정
 android.api = 35
