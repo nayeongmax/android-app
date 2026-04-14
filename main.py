@@ -1,30 +1,27 @@
 """
 소주 주량 트래커 (Soju Drinking Capacity Tracker)
 
-소주를 마실 때 자신의 주량을 넘기지 않도록 도와주는 앱.
-- 상단에서 자신의 주량(0.5~3병)을 선택
-- 자기 얼굴 사진을 추가
-- 한 잔 마실 때마다 사진이 점점 어두워짐 (블랙아웃)
-- 주량 도달 시 사진 완전 암전 + 알림음 반복
+- 상단에서 주량 선택
+- 귀여운 남자 얼굴이 한 잔마다 점점 빨개짐
+- 주량 도달 시 개 얼굴로 변신 + 알림음 반복
+- 소주잔 이미지 버튼으로 음주 기록
 """
 
 import os
 import math
 import struct
 import wave
-import shutil
 import tempfile
 
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.relativelayout import RelativeLayout
+from kivy.uix.widget import Widget
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
-from kivy.uix.image import Image as KivyImage
-from kivy.uix.filechooser import FileChooserListView
-from kivy.graphics import Color, Rectangle
+from kivy.graphics import Color, Rectangle, RoundedRectangle, Ellipse, Line
 from kivy.core.window import Window
 from kivy.core.text import LabelBase
 from kivy.core.audio import SoundLoader
@@ -42,34 +39,36 @@ if os.path.exists(_FONT_PATH):
 else:
     FONT = "Roboto"
 
-# ── Colors (dark theme) ────────────────────────────────────
-C_BG      = (0.08, 0.08, 0.11, 1)
-C_BTN     = (0.20, 0.20, 0.26, 1)
-C_BTN_SEL = (0.22, 0.48, 0.82, 1)
+# ── Colors (warm cute theme) ───────────────────────────────
+C_BG      = (0.14, 0.14, 0.19, 1)
+C_BTN_SEL = (0.35, 0.75, 0.55, 1)
 C_TEXT    = (1, 1, 1, 1)
-C_DIM     = (0.55, 0.55, 0.60, 1)
-C_GREEN   = (0.18, 0.75, 0.43, 1)
-C_ORANGE  = (0.95, 0.65, 0.12, 1)
-C_RED     = (0.88, 0.22, 0.22, 1)
+C_DIM     = (0.65, 0.65, 0.72, 1)
+C_GREEN   = (0.30, 0.72, 0.50, 1)
+C_ORANGE  = (0.95, 0.65, 0.25, 1)
+C_RED     = (0.90, 0.30, 0.30, 1)
+
+# 주량 버튼 파스텔 색상 (각각 다른 색)
+CAP_COLORS = [
+    (0.55, 0.75, 0.92, 1),   # 0.5병 - 하늘
+    (0.55, 0.82, 0.65, 1),   # 1병   - 민트
+    (0.90, 0.75, 0.55, 1),   # 1.5병 - 살구
+    (0.80, 0.60, 0.80, 1),   # 2병   - 보라
+    (0.92, 0.65, 0.65, 1),   # 2.5병 - 코랄
+    (0.65, 0.65, 0.88, 1),   # 3병   - 라벤더
+]
 
 # ── Soju math ───────────────────────────────────────────────
 GLASSES_PER_BOTTLE = 7.2
 BOTTLES = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
 
-# ── App data directory ──────────────────────────────────────
-_APP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".appdata")
-os.makedirs(_APP_DIR, exist_ok=True)
-_SAVED_PHOTO = os.path.join(_APP_DIR, "my_photo.jpg")
-
 
 def limit_glasses(bottles):
-    """주량(병) -> 소주잔 수 (반올림)"""
     return round(bottles * GLASSES_PER_BOTTLE)
 
 
 # ── Alarm sound ─────────────────────────────────────────────
 def _make_alarm(path, freq=880, dur=0.6, sr=44100):
-    """짧은 비프음 WAV (루프 재생용)"""
     n = int(sr * dur)
     with wave.open(path, "w") as w:
         w.setnchannels(1)
@@ -85,7 +84,7 @@ def _make_alarm(path, freq=880, dur=0.6, sr=44100):
 
 
 # ── UI helpers ──────────────────────────────────────────────
-def _btn(text, fs=18, bg=C_BTN, color=C_TEXT, bold=False, **kw):
+def _btn(text, fs=18, bg=(0.3, 0.3, 0.4, 1), color=C_TEXT, bold=False, **kw):
     return Button(
         text=text, font_name=FONT, font_size=sp(fs),
         color=color, bold=bold,
@@ -102,74 +101,256 @@ def _lbl(text, fs=16, color=C_TEXT, bold=False, **kw):
     )
 
 
-# ── Photo + Blackout overlay widget ────────────────────────
-class PhotoBlackoutView(RelativeLayout):
-    """사용자 사진 위에 블랙아웃 오버레이를 그리는 위젯"""
+# ── Cute face widget ───────────────────────────────────────
+class FaceView(Widget):
+    """귀여운 남자 얼굴 - 술 마실수록 빨개지고, 주량 도달 시 개로 변신"""
 
-    def __init__(self, on_tap=None, **kw):
+    def __init__(self, **kw):
         super().__init__(**kw)
-        self.darkness = 0.0
-        self._on_tap = on_tap
+        self.redness = 0.0
+        self.is_dog = False
+        self.bind(size=self._draw, pos=self._draw)
 
-        # 배경 (사진 없을 때 보이는 색)
-        with self.canvas.before:
-            Color(0.15, 0.15, 0.20, 1)
-            self._bg = Rectangle(pos=self.pos, size=self.size)
+    def _draw(self, *a):
+        self.canvas.clear()
+        x, y = self.pos
+        w, h = self.size
+        if w < 10 or h < 10:
+            return
+        cx, cy = x + w / 2, y + h / 2
+        r = min(w, h) * 0.33
 
-        # 플레이스홀더 텍스트
-        self.placeholder = Label(
-            text="여기를 터치하여\n사진을 추가하세요",
-            font_name=FONT, font_size=sp(15),
-            color=C_DIM, halign="center", valign="middle",
+        with self.canvas:
+            # Background
+            Color(*C_BG)
+            Rectangle(pos=(x, y), size=(w, h))
+
+            if self.is_dog:
+                self._dog(cx, cy, r)
+            else:
+                self._man(cx, cy, r)
+
+    def _man(self, cx, cy, r):
+        red = self.redness
+
+        # ── Hair (behind head) ──
+        Color(0.22, 0.16, 0.10, 1)
+        Ellipse(pos=(cx - r * 0.95, cy + r * 0.25), size=(r * 1.9, r * 1.05))
+
+        # ── Head ──
+        sg = 0.82 - red * 0.30
+        sb = 0.72 - red * 0.42
+        Color(1.0, sg, sb, 1)
+        Ellipse(pos=(cx - r, cy - r), size=(r * 2, r * 2))
+
+        # ── Eyebrows ──
+        Color(0.25, 0.18, 0.12, 1)
+        brow_y = cy + r * 0.38
+        bw, bh = r * 0.22, r * 0.05
+        tilt = red * dp(3)
+        Ellipse(pos=(cx - r * 0.38 - bw / 2, brow_y + tilt), size=(bw, bh))
+        Ellipse(pos=(cx + r * 0.38 - bw / 2, brow_y - tilt), size=(bw, bh))
+
+        # ── Eyes ──
+        ey = cy + r * 0.18
+        ew = r * 0.17
+        eh = r * 0.19 * max(0.25, 1.0 - red * 0.55)
+
+        Color(1, 1, 1, 1)
+        Ellipse(pos=(cx - r * 0.33 - ew, ey - eh), size=(ew * 2, eh * 2))
+        Ellipse(pos=(cx + r * 0.33 - ew, ey - eh), size=(ew * 2, eh * 2))
+
+        if eh > r * 0.04:
+            # Pupils
+            pr = min(ew, eh) * 0.55
+            Color(0.12, 0.10, 0.08, 1)
+            Ellipse(pos=(cx - r * 0.33 - pr, ey - pr), size=(pr * 2, pr * 2))
+            Ellipse(pos=(cx + r * 0.33 - pr, ey - pr), size=(pr * 2, pr * 2))
+            # Eye highlights
+            hr = pr * 0.35
+            Color(1, 1, 1, 0.85)
+            Ellipse(pos=(cx - r * 0.27, ey + pr * 0.35), size=(hr, hr))
+            Ellipse(pos=(cx + r * 0.39, ey + pr * 0.35), size=(hr, hr))
+
+        # ── Cheeks (get redder!) ──
+        ca = 0.20 + red * 0.60
+        Color(1.0, 0.35, 0.35, ca)
+        cr = r * 0.16
+        Ellipse(pos=(cx - r * 0.58 - cr, cy - r * 0.12 - cr), size=(cr * 2, cr * 2))
+        Ellipse(pos=(cx + r * 0.58 - cr, cy - r * 0.12 - cr), size=(cr * 2, cr * 2))
+
+        # ── Nose ──
+        Color(0.92, max(0.65 - red * 0.2, 0.45), max(0.55 - red * 0.3, 0.25), 1)
+        nr = r * 0.06
+        Ellipse(pos=(cx - nr, cy - r * 0.05 - nr), size=(nr * 2, nr * 2))
+
+        # ── Mouth ──
+        mw = r * (0.22 + red * 0.28)
+        mh = r * (0.06 + red * 0.16)
+        my = cy - r * 0.32
+        Color(0.82, 0.22, 0.22, 1)
+        Ellipse(pos=(cx - mw / 2, my - mh / 2), size=(mw, mh))
+        if mh > r * 0.1:
+            Color(0.95, 0.45, 0.45, 1)
+            Ellipse(pos=(cx - mw * 0.3, my), size=(mw * 0.6, mh * 0.4))
+
+        # ── Sweat drops when very drunk ──
+        if red > 0.6:
+            Color(0.6, 0.8, 1.0, 0.7)
+            Ellipse(pos=(cx + r * 0.75, cy + r * 0.3), size=(r * 0.08, r * 0.12))
+        if red > 0.85:
+            Ellipse(pos=(cx - r * 0.82, cy + r * 0.15), size=(r * 0.07, r * 0.10))
+
+    def _dog(self, cx, cy, r):
+        # ── Ears (floppy, behind head) ──
+        Color(0.58, 0.38, 0.22, 1)
+        ew, eh = r * 0.50, r * 0.85
+        Ellipse(pos=(cx - r - ew * 0.35, cy - r * 0.05), size=(ew, eh))
+        Ellipse(pos=(cx + r - ew * 0.65, cy - r * 0.05), size=(ew, eh))
+
+        # ── Head ──
+        Color(0.85, 0.72, 0.50, 1)
+        Ellipse(pos=(cx - r, cy - r), size=(r * 2, r * 2))
+
+        # ── Muzzle ──
+        Color(0.93, 0.83, 0.65, 1)
+        mr = r * 0.48
+        Ellipse(pos=(cx - mr, cy - r * 0.65), size=(mr * 2, mr * 1.2))
+
+        # ── Eyes (big, cute) ──
+        ey = cy + r * 0.22
+        er = r * 0.22
+        Color(1, 1, 1, 1)
+        Ellipse(pos=(cx - r * 0.38 - er, ey - er), size=(er * 2, er * 2))
+        Ellipse(pos=(cx + r * 0.38 - er, ey - er), size=(er * 2, er * 2))
+        # Pupils
+        pr = er * 0.62
+        Color(0.08, 0.06, 0.04, 1)
+        Ellipse(pos=(cx - r * 0.38 - pr, ey - pr), size=(pr * 2, pr * 2))
+        Ellipse(pos=(cx + r * 0.38 - pr, ey - pr), size=(pr * 2, pr * 2))
+        # Highlights
+        hr = er * 0.28
+        Color(1, 1, 1, 0.9)
+        Ellipse(pos=(cx - r * 0.30, ey + er * 0.25), size=(hr, hr))
+        Ellipse(pos=(cx + r * 0.46, ey + er * 0.25), size=(hr, hr))
+
+        # ── Eyebrows (worried) ──
+        Color(0.45, 0.30, 0.18, 1)
+        bbw, bbh = r * 0.18, r * 0.04
+        Ellipse(pos=(cx - r * 0.42 - bbw / 2, ey + er + r * 0.08), size=(bbw, bbh))
+        Ellipse(pos=(cx + r * 0.42 - bbw / 2, ey + er + r * 0.08), size=(bbw, bbh))
+
+        # ── Nose ──
+        Color(0.15, 0.10, 0.08, 1)
+        nw, nh = r * 0.15, r * 0.10
+        Ellipse(pos=(cx - nw, cy - r * 0.18), size=(nw * 2, nh * 2))
+
+        # ── Tongue ──
+        Color(1.0, 0.50, 0.50, 1)
+        tw, th = r * 0.20, r * 0.38
+        RoundedRectangle(
+            pos=(cx - tw, cy - r * 0.62), size=(tw * 2, th),
+            radius=[dp(2), dp(2), tw, tw],
         )
-        self.placeholder.bind(size=self.placeholder.setter("text_size"))
-        self.add_widget(self.placeholder)
+        Color(0.92, 0.40, 0.40, 1)
+        Line(
+            points=[cx, cy - r * 0.62, cx, cy - r * 0.62 + th * 0.85],
+            width=dp(1),
+        )
 
-        # 사진 이미지
-        self.img = KivyImage(allow_stretch=True, keep_ratio=True)
-        self.img.opacity = 0
-        self.add_widget(self.img)
+        # ── Red cheeks ──
+        Color(1.0, 0.40, 0.40, 0.40)
+        ccr = r * 0.14
+        Ellipse(pos=(cx - r * 0.60 - ccr, cy - r * 0.12 - ccr), size=(ccr * 2, ccr * 2))
+        Ellipse(pos=(cx + r * 0.60 - ccr, cy - r * 0.12 - ccr), size=(ccr * 2, ccr * 2))
 
-        # 블랙아웃 오버레이 (canvas.after = 자식 위에 그려짐)
-        with self.canvas.after:
-            self._ov_color = Color(0, 0, 0, 0)
-            self._ov_rect = Rectangle(pos=self.pos, size=self.size)
+    def set_redness(self, ratio):
+        self.redness = max(0.0, min(1.0, ratio))
+        self.is_dog = False
+        self._draw()
 
-        self.bind(pos=self._sync, size=self._sync)
+    def show_dog(self):
+        self.is_dog = True
+        self._draw()
 
-    def _sync(self, *a):
-        self._bg.pos = self.pos
-        self._bg.size = self.size
-        self._ov_rect.pos = self.pos
-        self._ov_rect.size = self.size
+    def reset(self):
+        self.redness = 0.0
+        self.is_dog = False
+        self._draw()
+
+
+# ── Soju glass button ──────────────────────────────────────
+class GlassBtn(RelativeLayout):
+    """소주잔 아이콘 + 텍스트 버튼"""
+
+    def __init__(self, text="한 잔!", on_press=None, **kw):
+        super().__init__(**kw)
+        self._on_press = on_press
+        self._color = C_GREEN
+
+        self.label = Label(
+            text=text, font_name=FONT, font_size=sp(20),
+            bold=True, color=C_TEXT,
+            pos_hint={"center_x": 0.58, "center_y": 0.5},
+        )
+        self.add_widget(self.label)
+
+        self.bind(pos=self._draw, size=self._draw)
+        Clock.schedule_once(lambda dt: self._draw(), 0)
+
+    def _draw(self, *a):
+        self.canvas.before.clear()
+        x, y = self.pos
+        w, h = self.size
+
+        with self.canvas.before:
+            # Background
+            Color(*self._color)
+            RoundedRectangle(pos=(x, y), size=(w, h), radius=[dp(14)])
+
+            # ── Glass icon (left side) ──
+            gx = x + w * 0.08
+            gy = y + h * 0.15
+            gw = dp(22)
+            gh = h * 0.70
+
+            # Glass body
+            Color(0.85, 0.90, 0.95, 0.60)
+            RoundedRectangle(
+                pos=(gx, gy), size=(gw, gh),
+                radius=[dp(3), dp(3), dp(1), dp(1)],
+            )
+            # Liquid
+            Color(0.78, 0.92, 0.80, 0.45)
+            lh = gh * 0.55
+            RoundedRectangle(
+                pos=(gx + dp(2), gy + dp(2)),
+                size=(gw - dp(4), lh),
+                radius=[dp(1)],
+            )
+            # Sparkle
+            Color(1, 1, 1, 0.65)
+            Ellipse(pos=(gx + gw * 0.55, gy + gh * 0.65), size=(dp(3), dp(3)))
+            Ellipse(pos=(gx + gw * 0.2, gy + gh * 0.45), size=(dp(2), dp(2)))
+
+    def set_state(self, text, color):
+        self.label.text = text
+        self._color = color
+        self._draw()
 
     def on_touch_down(self, touch):
         if self.disabled:
             return False
-        if self.collide_point(*touch.pos) and self._on_tap:
-            self._on_tap()
+        if self.collide_point(*touch.pos) and self._on_press:
+            self._on_press()
             return True
         return super().on_touch_down(touch)
-
-    def set_photo(self, path):
-        self.img.source = path
-        self.img.reload()
-        self.img.opacity = 1
-        self.placeholder.opacity = 0
-
-    def has_photo(self):
-        return self.img.opacity > 0
-
-    def set_darkness(self, ratio):
-        self.darkness = max(0.0, min(1.0, ratio))
-        self._ov_color.a = self.darkness
 
 
 # ── Main tracker widget ─────────────────────────────────────
 class SojuTracker(BoxLayout):
 
     def __init__(self, **kw):
-        # Android 상태바 높이만큼 상단 패딩 추가
         pad_top = dp(28) if platform == "android" else dp(10)
         super().__init__(
             orientation="vertical",
@@ -187,10 +368,6 @@ class SojuTracker(BoxLayout):
 
         self._draw_bg()
         self._build()
-
-        # 이전에 저장된 사진이 있으면 자동 로드
-        if os.path.exists(_SAVED_PHOTO):
-            Clock.schedule_once(lambda dt: self.blackout.set_photo(_SAVED_PHOTO), 0.1)
 
     def _draw_bg(self):
         with self.canvas.before:
@@ -234,15 +411,15 @@ class SojuTracker(BoxLayout):
 
         # 주량 선택 안내
         self.add_widget(_lbl(
-            "자신의 주량을 선택하세요",
+            "나의 주량을 선택하세요!",
             fs=13, color=C_DIM, size_hint_y=None, height=dp(22),
         ))
 
-        # 주량 선택 버튼 (3x2)
+        # 주량 선택 버튼 (3x2, 파스텔 색상)
         grid = GridLayout(cols=3, spacing=dp(5), size_hint_y=None, height=dp(90))
-        for b in BOTTLES:
+        for i, b in enumerate(BOTTLES):
             g = limit_glasses(b)
-            btn = _btn(f"{b:g}병\n({g}잔)", fs=13)
+            btn = _btn(f"{b:g}병\n({g}잔)", fs=13, bg=CAP_COLORS[i])
             btn.halign = "center"
             btn.bind(on_release=lambda _, v=b: self._pick(v))
             self._cap_btns[b] = btn
@@ -255,41 +432,32 @@ class SojuTracker(BoxLayout):
             opacity=0, disabled=True,
         )
 
-        # 주량 정보 + 사진 추가 버튼
-        info_row = BoxLayout(size_hint_y=None, height=dp(24), spacing=dp(5))
-        self.info_lbl = _lbl("", fs=13, color=C_DIM)
-        photo_btn = _btn("사진 추가", fs=11, bg=(0.30, 0.30, 0.45, 1),
-                         size_hint_x=0.35)
-        photo_btn.bind(on_release=lambda _: self._open_photo_picker())
-        info_row.add_widget(self.info_lbl)
-        info_row.add_widget(photo_btn)
-        self.drink_box.add_widget(info_row)
+        # 주량 정보
+        self.info_lbl = _lbl("", fs=13, color=C_DIM,
+                             size_hint_y=None, height=dp(22))
+        self.drink_box.add_widget(self.info_lbl)
 
-        # 사진 + 블랙아웃 뷰 (터치로도 사진 추가 가능)
-        self.blackout = PhotoBlackoutView(
-            on_tap=self._open_photo_picker,
-            size_hint_y=1,
-        )
-        self.drink_box.add_widget(self.blackout)
+        # 귀여운 얼굴 뷰
+        self.face = FaceView(size_hint_y=1)
+        self.drink_box.add_widget(self.face)
 
         # 잔 수 표시
         self.frac_lbl = _lbl("", fs=14, color=C_DIM,
                              size_hint_y=None, height=dp(20))
         self.drink_box.add_widget(self.frac_lbl)
 
-        # 한 잔 버튼
-        self.drink_btn = _btn(
-            "한 잔!", fs=24, bold=True, bg=C_GREEN,
+        # 소주잔 버튼
+        self.glass_btn = GlassBtn(
+            text="한 잔!", on_press=self._drink,
             size_hint_y=None, height=dp(60),
         )
-        self.drink_btn.bind(on_release=self._drink)
-        self.drink_box.add_widget(self.drink_btn)
+        self.drink_box.add_widget(self.glass_btn)
 
-        # 하단 버튼 (초기화 / 주량 변경)
+        # 하단 버튼
         row = BoxLayout(spacing=dp(5), size_hint_y=None, height=dp(38))
-        rb = _btn("초기화", fs=12, bg=(0.4, 0.18, 0.18, 1))
+        rb = _btn("초기화", fs=12, bg=(0.65, 0.35, 0.35, 1))
         rb.bind(on_release=self._reset)
-        cb = _btn("주량 변경", fs=12)
+        cb = _btn("주량 변경", fs=12, bg=(0.45, 0.45, 0.60, 1))
         cb.bind(on_release=self._change)
         row.add_widget(rb)
         row.add_widget(cb)
@@ -297,177 +465,23 @@ class SojuTracker(BoxLayout):
 
         self.add_widget(self.drink_box)
 
-    # ── 사진 선택 ──
-    def _open_photo_picker(self):
-        if platform == "android":
-            self._open_android_gallery()
-        else:
-            self._open_desktop_picker()
-
-    def _open_android_gallery(self):
-        """Android 시스템 갤러리에서 사진 선택 (썸네일 표시됨)"""
-        try:
-            from jnius import autoclass, cast
-            from android import activity as android_activity
-
-            Intent = autoclass("android.content.Intent")
-            MediaStore = autoclass("android.provider.MediaStore$Images$Media")
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-
-            # ACTION_PICK + MediaStore URI → 갤러리 앱이 직접 열림
-            intent = Intent(Intent.ACTION_PICK, MediaStore.EXTERNAL_CONTENT_URI)
-
-            android_activity.bind(on_activity_result=self._on_photo_result)
-
-            current = cast("android.app.Activity", PythonActivity.mActivity)
-            current.startActivityForResult(intent, 1001)
-        except Exception as e:
-            # 갤러리 실패 시 에러 팝업 표시
-            box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12))
-            box.add_widget(_lbl(
-                f"갤러리를 열 수 없습니다\n\n{e}",
-                fs=14, color=C_RED, halign="center",
-            ))
-            ok = _btn("확인", fs=14, bg=C_BTN, size_hint_y=None, height=dp(40))
-            box.add_widget(ok)
-            pop = Popup(title="오류", title_font=FONT, content=box,
-                        size_hint=(0.85, 0.35))
-            ok.bind(on_release=pop.dismiss)
-            pop.open()
-
-    def _on_photo_result(self, request_code, result_code, intent):
-        """Android 갤러리 선택 결과 처리"""
-        try:
-            from android import activity as android_activity
-            android_activity.unbind(on_activity_result=self._on_photo_result)
-        except Exception:
-            pass
-
-        if request_code != 1001 or intent is None:
-            return
-
-        try:
-            from jnius import autoclass
-            Activity = autoclass("android.app.Activity")
-            if result_code != Activity.RESULT_OK:
-                return
-
-            uri = intent.getData()
-            if uri is None:
-                return
-
-            Clock.schedule_once(lambda dt: self._copy_uri_image(uri), 0)
-        except Exception:
-            pass
-
-    def _copy_uri_image(self, uri):
-        """Content URI에서 이미지를 앱 저장소로 복사"""
-        dest = os.path.join(_APP_DIR, "my_photo.jpg")
-
-        try:
-            from jnius import autoclass
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            context = PythonActivity.mActivity
-            resolver = context.getContentResolver()
-
-            # ParcelFileDescriptor로 효율적 복사
-            pfd = resolver.openFileDescriptor(uri, "r")
-            fd = pfd.detachFd()
-
-            with os.fdopen(fd, "rb") as src:
-                with open(dest, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
-
-            global _SAVED_PHOTO
-            _SAVED_PHOTO = dest
-            self.blackout.set_photo(dest)
-        except Exception:
-            # Fallback: InputStream으로 바이트 복사
-            try:
-                from jnius import autoclass
-                PythonActivity = autoclass("org.kivy.android.PythonActivity")
-                context = PythonActivity.mActivity
-                istream = context.getContentResolver().openInputStream(uri)
-
-                BufferedInputStream = autoclass("java.io.BufferedInputStream")
-                bis = BufferedInputStream(istream, 16384)
-                data = bytearray()
-                while True:
-                    b = bis.read()
-                    if b == -1:
-                        break
-                    data.append(b & 0xFF)
-                bis.close()
-                istream.close()
-
-                with open(dest, "wb") as f:
-                    f.write(data)
-
-                _SAVED_PHOTO = dest
-                self.blackout.set_photo(dest)
-            except Exception:
-                pass
-
-    def _open_desktop_picker(self):
-        """데스크탑용 파일 선택기"""
-        content = BoxLayout(orientation="vertical", spacing=dp(5))
-
-        fc = FileChooserListView(
-            filters=["*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG", "*.JPEG"],
-            path=os.path.expanduser("~"),
-        )
-        content.add_widget(fc)
-
-        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(5))
-        sel_btn = _btn("선택", fs=15, bg=C_GREEN)
-        cancel_btn = _btn("취소", fs=15, bg=(0.4, 0.18, 0.18, 1))
-        btn_row.add_widget(sel_btn)
-        btn_row.add_widget(cancel_btn)
-        content.add_widget(btn_row)
-
-        pop = Popup(
-            title="사진을 선택하세요",
-            title_font=FONT, title_size=sp(16),
-            content=content,
-            size_hint=(0.95, 0.85),
-        )
-
-        def on_select(_):
-            if fc.selection:
-                self._save_and_set_photo(fc.selection[0])
-            pop.dismiss()
-
-        sel_btn.bind(on_release=on_select)
-        cancel_btn.bind(on_release=pop.dismiss)
-        pop.open()
-
-    def _save_and_set_photo(self, src_path):
-        """선택한 사진을 앱 저장소에 복사 후 표시"""
-        try:
-            ext = os.path.splitext(src_path)[1] or ".jpg"
-            dest = os.path.join(_APP_DIR, "my_photo" + ext)
-            shutil.copy2(src_path, dest)
-            # 기존 다른 확장자 파일 정리
-            global _SAVED_PHOTO
-            _SAVED_PHOTO = dest
-            self.blackout.set_photo(dest)
-        except Exception:
-            self.blackout.set_photo(src_path)
-
     # ── 주량 선택 ──
     def _pick(self, bottles):
         self.sel = bottles
         self.limit = limit_glasses(bottles)
         self.count = 0
         self.alarmed = False
-        for v, b in self._cap_btns.items():
-            b.background_color = C_BTN_SEL if v == bottles else C_BTN
+
+        for i, (v, b) in enumerate(self._cap_btns.items()):
+            b.background_color = C_BTN_SEL if v == bottles else CAP_COLORS[i]
+
         self.drink_box.opacity = 1
         self.drink_box.disabled = False
+        self.face.reset()
         self._refresh()
 
     # ── 한 잔 마심 ──
-    def _drink(self, *_):
+    def _drink(self):
         if self.sel is None:
             return
         self.count += 1
@@ -484,20 +498,17 @@ class SojuTracker(BoxLayout):
         self.info_lbl.text = f"주량: {self.sel:g}병 ({lim}잔)"
         self.frac_lbl.text = f"{c} / {lim} 잔"
 
-        # 블랙아웃 효과
         ratio = c / lim if lim else 0
-        self.blackout.set_darkness(min(1.0, ratio))
 
-        # 버튼 색상
         if c >= lim:
-            self.drink_btn.background_color = C_RED
-            self.drink_btn.text = "그만 드세요!"
+            self.face.show_dog()
+            self.glass_btn.set_state("그만 드세요!", C_RED)
         elif c >= lim * 0.7:
-            self.drink_btn.background_color = C_ORANGE
-            self.drink_btn.text = "한 잔... (거의 다 찼어요!)"
+            self.face.set_redness(min(1.0, ratio))
+            self.glass_btn.set_state("한 잔... (거의 다!)", C_ORANGE)
         else:
-            self.drink_btn.background_color = C_GREEN
-            self.drink_btn.text = "한 잔!"
+            self.face.set_redness(ratio)
+            self.glass_btn.set_state("한 잔!", C_GREEN)
 
     # ── 주량 도달 알람 ──
     def _alarm(self):
@@ -510,12 +521,10 @@ class SojuTracker(BoxLayout):
         self._vibrate()
 
         box = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(16))
-        box.add_widget(_lbl(
-            "BLACKOUT!", fs=32, bold=True, color=C_RED,
-        ))
+        box.add_widget(_lbl("멍! 멍!", fs=32, bold=True, color=C_RED))
         box.add_widget(_lbl(
             f"{self.sel:g}병({self.limit}잔)을\n모두 마셨습니다!\n\n"
-            "건강을 위해\n이제 그만 드세요!",
+            "이제 그만 드세요!",
             fs=16, halign="center",
         ))
         ok = _btn("알림 끄기", fs=18, bg=C_RED,
@@ -583,6 +592,7 @@ class SojuTracker(BoxLayout):
         self._stop_sound()
         self.count = 0
         self.alarmed = False
+        self.face.reset()
         self._refresh()
 
     # ── 주량 변경 ──
@@ -591,10 +601,11 @@ class SojuTracker(BoxLayout):
         self.sel = None
         self.count = 0
         self.alarmed = False
+        self.face.reset()
         self.drink_box.opacity = 0
         self.drink_box.disabled = True
-        for b in self._cap_btns.values():
-            b.background_color = C_BTN
+        for i, b in enumerate(self._cap_btns.values()):
+            b.background_color = CAP_COLORS[i]
 
 
 # ── App ─────────────────────────────────────────────────────
