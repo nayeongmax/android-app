@@ -1,31 +1,28 @@
 [app]
 
 # 앱 이름 및 패키지 정보
-title = SurveyCrossSection
-package.name = surveycrosssection
-package.domain = org.survey
+title = SojuTracker
+package.name = sojutracker
+package.domain = org.soju
 
 # 소스
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,ttf
+source.include_exts = py,ttf,wav
 source.include_patterns = fonts/*.ttf
 
 # 버전
 version = 1.0
 
 # requirements
-requirements = python3,kivy==2.3.0,pillow,matplotlib,numpy
-
-# matplotlib 환경변수
-android.env_vars = MPLBACKEND=Agg
+requirements = python3,kivy==2.3.0,plyer
 
 # 화면 방향 (세로)
 orientation = portrait
 
 # 권한
-android.permissions = READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+android.permissions = VIBRATE
 
-# Android 설정 (원래 빌드 성공했던 값 유지)
+# Android 설정
 android.api = 35
 android.minapi = 24
 android.ndk = 25b
