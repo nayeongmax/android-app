@@ -299,18 +299,107 @@ class SojuTracker(BoxLayout):
 
     # ── 사진 선택 ──
     def _open_photo_picker(self):
-        content = BoxLayout(orientation="vertical", spacing=dp(5))
-
         if platform == "android":
-            start = "/storage/emulated/0/DCIM"
-            if not os.path.exists(start):
-                start = "/storage/emulated/0"
+            self._open_android_gallery()
         else:
-            start = os.path.expanduser("~")
+            self._open_desktop_picker()
+
+    def _open_android_gallery(self):
+        """Android 시스템 갤러리에서 사진 선택 (썸네일 표시됨)"""
+        try:
+            from jnius import autoclass, cast
+            from android import activity as android_activity
+
+            Intent = autoclass("android.content.Intent")
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+
+            intent = Intent(Intent.ACTION_GET_CONTENT)
+            intent.setType("image/*")
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+
+            android_activity.bind(on_activity_result=self._on_photo_result)
+
+            current = cast("android.app.Activity", PythonActivity.mActivity)
+            current.startActivityForResult(
+                Intent.createChooser(intent, "사진 선택"), 1001
+            )
+        except Exception:
+            self._open_desktop_picker()
+
+    def _on_photo_result(self, request_code, result_code, intent):
+        """Android 갤러리 선택 결과 처리"""
+        from android import activity as android_activity
+        android_activity.unbind(on_activity_result=self._on_photo_result)
+
+        if request_code != 1001 or intent is None:
+            return
+
+        from jnius import autoclass
+        Activity = autoclass("android.app.Activity")
+        if result_code != Activity.RESULT_OK:
+            return
+
+        uri = intent.getData()
+        if uri is None:
+            return
+
+        Clock.schedule_once(lambda dt: self._copy_uri_image(uri), 0)
+
+    def _copy_uri_image(self, uri):
+        """Content URI에서 이미지를 앱 저장소로 복사"""
+        dest = os.path.join(_APP_DIR, "my_photo.jpg")
+
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            context = PythonActivity.mActivity
+            resolver = context.getContentResolver()
+
+            # ParcelFileDescriptor로 효율적 복사
+            pfd = resolver.openFileDescriptor(uri, "r")
+            fd = pfd.detachFd()
+
+            with os.fdopen(fd, "rb") as src:
+                with open(dest, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+
+            global _SAVED_PHOTO
+            _SAVED_PHOTO = dest
+            self.blackout.set_photo(dest)
+        except Exception:
+            # Fallback: InputStream으로 바이트 복사
+            try:
+                from jnius import autoclass
+                PythonActivity = autoclass("org.kivy.android.PythonActivity")
+                context = PythonActivity.mActivity
+                istream = context.getContentResolver().openInputStream(uri)
+
+                BufferedInputStream = autoclass("java.io.BufferedInputStream")
+                bis = BufferedInputStream(istream, 16384)
+                data = bytearray()
+                while True:
+                    b = bis.read()
+                    if b == -1:
+                        break
+                    data.append(b & 0xFF)
+                bis.close()
+                istream.close()
+
+                with open(dest, "wb") as f:
+                    f.write(data)
+
+                _SAVED_PHOTO = dest
+                self.blackout.set_photo(dest)
+            except Exception:
+                pass
+
+    def _open_desktop_picker(self):
+        """데스크탑용 파일 선택기"""
+        content = BoxLayout(orientation="vertical", spacing=dp(5))
 
         fc = FileChooserListView(
             filters=["*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG", "*.JPEG"],
-            path=start,
+            path=os.path.expanduser("~"),
         )
         content.add_widget(fc)
 
