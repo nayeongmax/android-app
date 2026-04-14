@@ -311,39 +311,54 @@ class SojuTracker(BoxLayout):
             from android import activity as android_activity
 
             Intent = autoclass("android.content.Intent")
+            MediaStore = autoclass("android.provider.MediaStore$Images$Media")
             PythonActivity = autoclass("org.kivy.android.PythonActivity")
 
-            intent = Intent(Intent.ACTION_GET_CONTENT)
-            intent.setType("image/*")
-            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            # ACTION_PICK + MediaStore URI → 갤러리 앱이 직접 열림
+            intent = Intent(Intent.ACTION_PICK, MediaStore.EXTERNAL_CONTENT_URI)
 
             android_activity.bind(on_activity_result=self._on_photo_result)
 
             current = cast("android.app.Activity", PythonActivity.mActivity)
-            current.startActivityForResult(
-                Intent.createChooser(intent, "사진 선택"), 1001
-            )
-        except Exception:
-            self._open_desktop_picker()
+            current.startActivityForResult(intent, 1001)
+        except Exception as e:
+            # 갤러리 실패 시 에러 팝업 표시
+            box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12))
+            box.add_widget(_lbl(
+                f"갤러리를 열 수 없습니다\n\n{e}",
+                fs=14, color=C_RED, halign="center",
+            ))
+            ok = _btn("확인", fs=14, bg=C_BTN, size_hint_y=None, height=dp(40))
+            box.add_widget(ok)
+            pop = Popup(title="오류", title_font=FONT, content=box,
+                        size_hint=(0.85, 0.35))
+            ok.bind(on_release=pop.dismiss)
+            pop.open()
 
     def _on_photo_result(self, request_code, result_code, intent):
         """Android 갤러리 선택 결과 처리"""
-        from android import activity as android_activity
-        android_activity.unbind(on_activity_result=self._on_photo_result)
+        try:
+            from android import activity as android_activity
+            android_activity.unbind(on_activity_result=self._on_photo_result)
+        except Exception:
+            pass
 
         if request_code != 1001 or intent is None:
             return
 
-        from jnius import autoclass
-        Activity = autoclass("android.app.Activity")
-        if result_code != Activity.RESULT_OK:
-            return
+        try:
+            from jnius import autoclass
+            Activity = autoclass("android.app.Activity")
+            if result_code != Activity.RESULT_OK:
+                return
 
-        uri = intent.getData()
-        if uri is None:
-            return
+            uri = intent.getData()
+            if uri is None:
+                return
 
-        Clock.schedule_once(lambda dt: self._copy_uri_image(uri), 0)
+            Clock.schedule_once(lambda dt: self._copy_uri_image(uri), 0)
+        except Exception:
+            pass
 
     def _copy_uri_image(self, uri):
         """Content URI에서 이미지를 앱 저장소로 복사"""
