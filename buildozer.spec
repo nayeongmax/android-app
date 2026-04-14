@@ -14,7 +14,7 @@ source.include_patterns = fonts/*.ttf
 version = 1.0
 
 # requirements
-requirements = python3,kivy==2.3.0,plyer
+requirements = python3,kivy==2.3.0,plyer,pyjnius,android
 
 # 화면 방향 (세로)
 orientation = portrait
