@@ -144,6 +144,8 @@ class PhotoBlackoutView(RelativeLayout):
         self._ov_rect.size = self.size
 
     def on_touch_down(self, touch):
+        if self.disabled:
+            return False
         if self.collide_point(*touch.pos) and self._on_tap:
             self._on_tap()
             return True
@@ -167,7 +169,14 @@ class PhotoBlackoutView(RelativeLayout):
 class SojuTracker(BoxLayout):
 
     def __init__(self, **kw):
-        super().__init__(orientation="vertical", padding=dp(10), spacing=dp(4), **kw)
+        # Android 상태바 높이만큼 상단 패딩 추가
+        pad_top = dp(28) if platform == "android" else dp(10)
+        super().__init__(
+            orientation="vertical",
+            padding=[dp(10), pad_top, dp(10), dp(10)],
+            spacing=dp(4),
+            **kw,
+        )
 
         self.sel = None
         self.limit = 0
