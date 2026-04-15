@@ -2,9 +2,8 @@
 소주 주량 트래커 (Soju Drinking Capacity Tracker)
 
 - 상단에서 주량 선택
-- 귀여운 남자 얼굴이 한 잔마다 점점 빨개짐
-- 주량 도달 시 개 얼굴로 변신 + 알림음 반복
-- 소주잔 이미지 버튼으로 음주 기록
+- 얼굴이 한 잔마다 점점 빨개짐
+- 주량 도달 시 개로 변신 + 알림음 반복
 """
 
 import os
@@ -15,12 +14,10 @@ import wave
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
-from kivy.uix.relativelayout import RelativeLayout
-from kivy.uix.widget import Widget
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
-from kivy.graphics import Color, Rectangle, Ellipse
+from kivy.graphics import Color, Rectangle
 from kivy.core.window import Window
 from kivy.core.text import LabelBase
 from kivy.core.audio import SoundLoader
@@ -41,23 +38,22 @@ if os.path.exists(_FONT_PATH):
 else:
     FONT = "Roboto"
 
-# ── Colors (warm cute theme) ───────────────────────────────
-C_BG      = (0.14, 0.14, 0.19, 1)
-C_BTN_SEL = (0.35, 0.75, 0.55, 1)
+# ── Colors ──────────────────────────────────────────────────
+C_BG      = (0.12, 0.12, 0.16, 1)
+C_BTN_SEL = (0.30, 0.70, 0.50, 1)
 C_TEXT    = (1, 1, 1, 1)
-C_DIM     = (0.65, 0.65, 0.72, 1)
-C_GREEN   = (0.30, 0.72, 0.50, 1)
-C_ORANGE  = (0.95, 0.65, 0.25, 1)
-C_RED     = (0.90, 0.30, 0.30, 1)
+C_DIM     = (0.60, 0.60, 0.68, 1)
+C_GREEN   = (0.25, 0.70, 0.45, 1)
+C_ORANGE  = (0.92, 0.62, 0.22, 1)
+C_RED     = (0.88, 0.28, 0.28, 1)
 
-# 주량 버튼 파스텔 색상
 CAP_COLORS = [
-    (0.55, 0.75, 0.92, 1),
-    (0.55, 0.82, 0.65, 1),
-    (0.90, 0.75, 0.55, 1),
-    (0.80, 0.60, 0.80, 1),
-    (0.92, 0.65, 0.65, 1),
-    (0.65, 0.65, 0.88, 1),
+    (0.50, 0.72, 0.90, 1),
+    (0.50, 0.80, 0.62, 1),
+    (0.88, 0.72, 0.50, 1),
+    (0.78, 0.55, 0.78, 1),
+    (0.90, 0.60, 0.60, 1),
+    (0.60, 0.60, 0.85, 1),
 ]
 
 # ── Soju math ───────────────────────────────────────────────
@@ -70,33 +66,6 @@ def limit_glasses(bottles):
 
 
 # ── Alarm sound ─────────────────────────────────────────────
-def _get_sound_path():
-    """Android/PC 모두 쓸 수 있는 임시 파일 경로"""
-    candidates = []
-    if platform == "android":
-        candidates.append(os.path.join(_BASE, ".cache"))
-        candidates.append("/data/local/tmp")
-    try:
-        import tempfile
-        candidates.append(tempfile.gettempdir())
-    except Exception:
-        pass
-    candidates.append(_BASE)
-
-    for d in candidates:
-        try:
-            os.makedirs(d, exist_ok=True)
-            p = os.path.join(d, "soju_alarm.wav")
-            # test writable
-            with open(p, "wb") as f:
-                f.write(b"test")
-            os.remove(p)
-            return p
-        except Exception:
-            continue
-    return None
-
-
 def _make_alarm(path, freq=880, dur=0.6, sr=44100):
     n = int(sr * dur)
     with wave.open(path, "w") as w:
@@ -113,7 +82,7 @@ def _make_alarm(path, freq=880, dur=0.6, sr=44100):
 
 
 # ── UI helpers ──────────────────────────────────────────────
-def _btn(text, fs=18, bg=(0.3, 0.3, 0.4, 1), color=C_TEXT, bold=False, **kw):
+def _btn(text, fs=18, bg=(0.25, 0.25, 0.32, 1), color=C_TEXT, bold=False, **kw):
     return Button(
         text=text, font_name=FONT, font_size=sp(fs),
         color=color, bold=bold,
@@ -130,260 +99,95 @@ def _lbl(text, fs=16, color=C_TEXT, bold=False, **kw):
     )
 
 
-# ── Cute face widget ───────────────────────────────────────
-class FaceView(Widget):
-    """귀여운 남자 얼굴 - 술 마실수록 빨개지고, 주량 도달 시 개로 변신"""
+# ── Face display (standard widgets only) ───────────────────
+class FaceDisplay(BoxLayout):
+    """얼굴 표시 - 배경색이 점점 빨개지고 텍스트 표정이 변함"""
 
     def __init__(self, **kw):
-        super().__init__(**kw)
-        self.redness = 0.0
-        self.is_dog = False
-        self.bind(size=self._safe_draw, pos=self._safe_draw)
-
-    def _safe_draw(self, *a):
-        try:
-            self._draw()
-        except Exception:
-            pass
-
-    def _draw(self):
-        self.canvas.clear()
-        x, y = self.pos
-        w, h = self.size
-        if w < 20 or h < 20:
-            return
-        cx, cy = x + w / 2, y + h / 2
-        r = min(w, h) * 0.33
-        if r < 5:
-            return
-
-        with self.canvas:
-            Color(*C_BG)
-            Rectangle(pos=(x, y), size=(w, h))
-
-            if self.is_dog:
-                self._dog(cx, cy, r)
-            else:
-                self._man(cx, cy, r)
-
-    def _man(self, cx, cy, r):
-        red = self.redness
-
-        # Hair (behind head)
-        Color(0.22, 0.16, 0.10, 1)
-        Ellipse(pos=(cx - r * 0.95, cy + r * 0.25), size=(r * 1.9, r * 1.05))
-
-        # Head
-        sg = 0.82 - red * 0.30
-        sb = 0.72 - red * 0.42
-        Color(1.0, sg, sb, 1)
-        Ellipse(pos=(cx - r, cy - r), size=(r * 2, r * 2))
-
-        # Eyebrows
-        Color(0.25, 0.18, 0.12, 1)
-        brow_y = cy + r * 0.38
-        bw, bh = r * 0.22, max(r * 0.05, 2)
-        tilt = red * 3
-        Ellipse(pos=(cx - r * 0.38 - bw / 2, brow_y + tilt), size=(bw, bh))
-        Ellipse(pos=(cx + r * 0.38 - bw / 2, brow_y - tilt), size=(bw, bh))
-
-        # Eyes
-        ey = cy + r * 0.18
-        ew = r * 0.17
-        eh = max(r * 0.19 * max(0.25, 1.0 - red * 0.55), 2)
-
-        Color(1, 1, 1, 1)
-        Ellipse(pos=(cx - r * 0.33 - ew, ey - eh), size=(ew * 2, eh * 2))
-        Ellipse(pos=(cx + r * 0.33 - ew, ey - eh), size=(ew * 2, eh * 2))
-
-        if eh > 3:
-            # Pupils
-            pr = min(ew, eh) * 0.55
-            Color(0.12, 0.10, 0.08, 1)
-            Ellipse(pos=(cx - r * 0.33 - pr, ey - pr), size=(pr * 2, pr * 2))
-            Ellipse(pos=(cx + r * 0.33 - pr, ey - pr), size=(pr * 2, pr * 2))
-            # Eye highlights
-            hr = max(pr * 0.35, 1)
-            Color(1, 1, 1, 0.85)
-            Ellipse(pos=(cx - r * 0.27, ey + pr * 0.35), size=(hr, hr))
-            Ellipse(pos=(cx + r * 0.39, ey + pr * 0.35), size=(hr, hr))
-
-        # Cheeks (get redder)
-        ca = 0.20 + red * 0.60
-        Color(1.0, 0.35, 0.35, ca)
-        cr = r * 0.16
-        Ellipse(pos=(cx - r * 0.58 - cr, cy - r * 0.12 - cr), size=(cr * 2, cr * 2))
-        Ellipse(pos=(cx + r * 0.58 - cr, cy - r * 0.12 - cr), size=(cr * 2, cr * 2))
-
-        # Nose
-        nr = max(r * 0.06, 2)
-        Color(0.92, max(0.65 - red * 0.2, 0.45), max(0.55 - red * 0.3, 0.25), 1)
-        Ellipse(pos=(cx - nr, cy - r * 0.05 - nr), size=(nr * 2, nr * 2))
-
-        # Mouth
-        mw = r * (0.22 + red * 0.28)
-        mh = max(r * (0.06 + red * 0.16), 2)
-        my = cy - r * 0.32
-        Color(0.82, 0.22, 0.22, 1)
-        Ellipse(pos=(cx - mw / 2, my - mh / 2), size=(mw, mh))
-
-        # Sweat drops
-        if red > 0.6:
-            Color(0.6, 0.8, 1.0, 0.7)
-            sw = max(r * 0.08, 2)
-            sh = max(r * 0.12, 3)
-            Ellipse(pos=(cx + r * 0.75, cy + r * 0.3), size=(sw, sh))
-        if red > 0.85:
-            Color(0.6, 0.8, 1.0, 0.7)
-            Ellipse(pos=(cx - r * 0.82, cy + r * 0.15), size=(sw, sh))
-
-    def _dog(self, cx, cy, r):
-        # Ears (floppy)
-        Color(0.58, 0.38, 0.22, 1)
-        ew, eh = r * 0.50, r * 0.85
-        Ellipse(pos=(cx - r - ew * 0.35, cy - r * 0.05), size=(ew, eh))
-        Ellipse(pos=(cx + r - ew * 0.65, cy - r * 0.05), size=(ew, eh))
-
-        # Head
-        Color(0.85, 0.72, 0.50, 1)
-        Ellipse(pos=(cx - r, cy - r), size=(r * 2, r * 2))
-
-        # Muzzle
-        Color(0.93, 0.83, 0.65, 1)
-        mr = r * 0.48
-        Ellipse(pos=(cx - mr, cy - r * 0.65), size=(mr * 2, mr * 1.2))
-
-        # Eyes (big, cute)
-        ey = cy + r * 0.22
-        er = r * 0.22
-        Color(1, 1, 1, 1)
-        Ellipse(pos=(cx - r * 0.38 - er, ey - er), size=(er * 2, er * 2))
-        Ellipse(pos=(cx + r * 0.38 - er, ey - er), size=(er * 2, er * 2))
-
-        # Pupils
-        pr = er * 0.62
-        Color(0.08, 0.06, 0.04, 1)
-        Ellipse(pos=(cx - r * 0.38 - pr, ey - pr), size=(pr * 2, pr * 2))
-        Ellipse(pos=(cx + r * 0.38 - pr, ey - pr), size=(pr * 2, pr * 2))
-
-        # Highlights
-        hr = max(er * 0.28, 2)
-        Color(1, 1, 1, 0.9)
-        Ellipse(pos=(cx - r * 0.30, ey + er * 0.25), size=(hr, hr))
-        Ellipse(pos=(cx + r * 0.46, ey + er * 0.25), size=(hr, hr))
-
-        # Eyebrows
-        Color(0.45, 0.30, 0.18, 1)
-        bbw = r * 0.18
-        bbh = max(r * 0.04, 2)
-        Ellipse(pos=(cx - r * 0.42 - bbw / 2, ey + er + r * 0.08), size=(bbw, bbh))
-        Ellipse(pos=(cx + r * 0.42 - bbw / 2, ey + er + r * 0.08), size=(bbw, bbh))
-
-        # Nose
-        Color(0.15, 0.10, 0.08, 1)
-        nw, nh = r * 0.15, max(r * 0.10, 2)
-        Ellipse(pos=(cx - nw, cy - r * 0.18), size=(nw * 2, nh * 2))
-
-        # Tongue (Rectangle instead of RoundedRectangle for compatibility)
-        Color(1.0, 0.50, 0.50, 1)
-        tw = r * 0.20
-        th = r * 0.35
-        Ellipse(pos=(cx - tw, cy - r * 0.65), size=(tw * 2, th))
-
-        # Tongue center line (thin rectangle instead of Line)
-        Color(0.92, 0.40, 0.40, 1)
-        lw = max(2, r * 0.02)
-        Rectangle(pos=(cx - lw / 2, cy - r * 0.65), size=(lw, th * 0.85))
-
-        # Red cheeks
-        Color(1.0, 0.40, 0.40, 0.40)
-        ccr = r * 0.14
-        Ellipse(pos=(cx - r * 0.60 - ccr, cy - r * 0.12 - ccr), size=(ccr * 2, ccr * 2))
-        Ellipse(pos=(cx + r * 0.60 - ccr, cy - r * 0.12 - ccr), size=(ccr * 2, ccr * 2))
-
-    def set_redness(self, ratio):
-        self.redness = max(0.0, min(1.0, ratio))
-        self.is_dog = False
-        self._safe_draw()
-
-    def show_dog(self):
-        self.is_dog = True
-        self._safe_draw()
-
-    def reset(self):
-        self.redness = 0.0
-        self.is_dog = False
-        self._safe_draw()
-
-
-# ── Soju glass button ──────────────────────────────────────
-class GlassBtn(RelativeLayout):
-    """소주잔 아이콘 + 텍스트 버튼"""
-
-    def __init__(self, text="한 잔!", on_press=None, **kw):
-        super().__init__(**kw)
-        self._on_press = on_press
-        self._color = C_GREEN
-
-        self.label = Label(
-            text=text, font_name=FONT, font_size=sp(20),
-            bold=True, color=C_TEXT,
-            pos_hint={"center_x": 0.58, "center_y": 0.5},
-        )
-        self.add_widget(self.label)
-
-        self.bind(pos=self._safe_draw, size=self._safe_draw)
-        Clock.schedule_once(lambda dt: self._safe_draw(), 0.1)
-
-    def _safe_draw(self, *a):
-        try:
-            self._draw()
-        except Exception:
-            pass
-
-    def _draw(self):
-        self.canvas.before.clear()
-        x, y = self.pos
-        w, h = self.size
-        if w < 10 or h < 10:
-            return
+        super().__init__(orientation="vertical", **kw)
 
         with self.canvas.before:
-            # Background (simple Rectangle for compatibility)
-            Color(*self._color)
-            Rectangle(pos=(x, y), size=(w, h))
+            self._bg_color = Color(0.18, 0.18, 0.24, 1)
+            self._bg_rect = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self._sync, size=self._sync)
 
-            # Glass icon
-            gx = x + w * 0.08
-            gy = y + h * 0.15
-            gw = max(w * 0.06, 15)
-            gh = h * 0.70
+        # 얼굴 텍스트
+        self.face_lbl = Label(
+            text="( ^_^ )", font_name=FONT, font_size=sp(52),
+            bold=True, color=(1, 1, 1, 1),
+            halign="center", valign="middle",
+        )
+        self.face_lbl.bind(size=self.face_lbl.setter("text_size"))
+        self.add_widget(self.face_lbl)
 
-            # Glass body
-            Color(0.85, 0.90, 0.95, 0.60)
-            Rectangle(pos=(gx, gy), size=(gw, gh))
+        # 상태 텍스트
+        self.status_lbl = Label(
+            text="", font_name=FONT, font_size=sp(15),
+            color=C_DIM, halign="center",
+            size_hint_y=None, height=dp(28),
+        )
+        self.add_widget(self.status_lbl)
 
-            # Liquid
-            Color(0.78, 0.92, 0.80, 0.45)
-            lh = gh * 0.55
-            Rectangle(pos=(gx + 2, gy + 2), size=(max(gw - 4, 2), lh))
+    def _sync(self, *a):
+        self._bg_rect.pos = self.pos
+        self._bg_rect.size = self.size
 
-            # Sparkle
-            Color(1, 1, 1, 0.65)
-            Ellipse(pos=(gx + gw * 0.5, gy + gh * 0.65), size=(4, 4))
+    def set_redness(self, ratio):
+        r = max(0.0, min(1.0, ratio))
 
-    def set_state(self, text, color):
-        self.label.text = text
-        self._color = color
-        self._safe_draw()
+        # 배경색: 점점 빨개짐
+        bg_r = 0.18 + r * 0.42
+        bg_g = max(0.18 - r * 0.12, 0.06)
+        bg_b = max(0.24 - r * 0.18, 0.06)
+        self._bg_color.rgba = (bg_r, bg_g, bg_b, 1)
 
-    def on_touch_down(self, touch):
-        if self.disabled:
-            return False
-        if self.collide_point(*touch.pos) and self._on_press:
-            self._on_press()
-            return True
-        return super().on_touch_down(touch)
+        # 텍스트 색: 점점 붉어짐
+        txt_g = max(1.0 - r * 0.5, 0.5)
+        txt_b = max(1.0 - r * 0.6, 0.4)
+
+        if r < 0.15:
+            self.face_lbl.text = "( ^_^ )"
+            self.status_lbl.text = ""
+        elif r < 0.35:
+            self.face_lbl.text = "( ^o^ )"
+            self.status_lbl.text = "기분 좋다~"
+            self.face_lbl.color = (1, txt_g, txt_b, 1)
+        elif r < 0.55:
+            self.face_lbl.text = "( >v< )"
+            self.face_lbl.font_size = sp(54)
+            self.status_lbl.text = "조금 취했어..."
+            self.face_lbl.color = (1, txt_g, txt_b, 1)
+        elif r < 0.75:
+            self.face_lbl.text = "( >_< )"
+            self.face_lbl.font_size = sp(56)
+            self.status_lbl.text = "많이 취했어!!"
+            self.face_lbl.color = (1, txt_g, txt_b, 1)
+        elif r < 0.95:
+            self.face_lbl.text = "( @_@ )"
+            self.face_lbl.font_size = sp(58)
+            self.status_lbl.text = "위험해!! 거의 다 찼어!"
+            self.face_lbl.color = (1, txt_g, txt_b, 1)
+        else:
+            self.face_lbl.text = "( x_x )"
+            self.face_lbl.font_size = sp(60)
+            self.status_lbl.text = "한계야!!!"
+            self.face_lbl.color = (1, 0.4, 0.35, 1)
+
+    def show_dog(self):
+        self._bg_color.rgba = (0.35, 0.22, 0.12, 1)
+        self.face_lbl.text = "U^.^U"
+        self.face_lbl.font_size = sp(60)
+        self.face_lbl.color = (1, 0.88, 0.65, 1)
+        self.status_lbl.text = "멍멍!! 그만 마셔!!!"
+        self.status_lbl.color = C_RED
+
+    def reset(self):
+        self._bg_color.rgba = (0.18, 0.18, 0.24, 1)
+        self.face_lbl.text = "( ^_^ )"
+        self.face_lbl.font_size = sp(52)
+        self.face_lbl.color = (1, 1, 1, 1)
+        self.status_lbl.text = ""
+        self.status_lbl.color = C_DIM
 
 
 # ── Main tracker widget ─────────────────────────────────────
@@ -405,14 +209,12 @@ class SojuTracker(BoxLayout):
         self._cap_btns = {}
         self._sound = self._load_sound()
 
-        self._draw_bg()
-        self._build()
-
-    def _draw_bg(self):
         with self.canvas.before:
             Color(*C_BG)
             self._bg_rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._sync_bg, size=self._sync_bg)
+
+        self._build()
 
     def _sync_bg(self, *_):
         self._bg_rect.pos = self.pos
@@ -420,14 +222,19 @@ class SojuTracker(BoxLayout):
 
     def _load_sound(self):
         try:
-            p = _get_sound_path()
-            if p is None:
-                return None
-            _make_alarm(p)
-            snd = SoundLoader.load(p)
-            if snd:
-                snd.loop = True
-            return snd
+            # Android/PC 모두 호환되는 경로 찾기
+            for d in [_BASE, os.path.join(_BASE, ".cache")]:
+                try:
+                    os.makedirs(d, exist_ok=True)
+                    p = os.path.join(d, "alarm.wav")
+                    _make_alarm(p)
+                    snd = SoundLoader.load(p)
+                    if snd:
+                        snd.loop = True
+                        return snd
+                except Exception:
+                    continue
+            return None
         except Exception:
             return None
 
@@ -438,8 +245,8 @@ class SojuTracker(BoxLayout):
             except Exception:
                 pass
 
-    # ── UI 구성 ──
     def _build(self):
+        # 제목
         self.add_widget(_lbl(
             "소주 주량 트래커", fs=22, bold=True,
             size_hint_y=None, height=dp(32),
@@ -453,6 +260,7 @@ class SojuTracker(BoxLayout):
             fs=13, color=C_DIM, size_hint_y=None, height=dp(22),
         ))
 
+        # 주량 선택 버튼 (파스텔 색상)
         grid = GridLayout(cols=3, spacing=dp(5), size_hint_y=None, height=dp(90))
         for i, b in enumerate(BOTTLES):
             g = limit_glasses(b)
@@ -463,7 +271,7 @@ class SojuTracker(BoxLayout):
             grid.add_widget(btn)
         self.add_widget(grid)
 
-        # 음주 기록 영역
+        # ── 음주 기록 영역 ──
         self.drink_box = BoxLayout(
             orientation="vertical", spacing=dp(4),
             opacity=0, disabled=True,
@@ -473,23 +281,28 @@ class SojuTracker(BoxLayout):
                              size_hint_y=None, height=dp(22))
         self.drink_box.add_widget(self.info_lbl)
 
-        self.face = FaceView(size_hint_y=1)
+        # 얼굴 표시 영역
+        self.face = FaceDisplay(size_hint_y=1)
         self.drink_box.add_widget(self.face)
 
-        self.frac_lbl = _lbl("", fs=14, color=C_DIM,
-                             size_hint_y=None, height=dp(20))
+        # 잔 수
+        self.frac_lbl = _lbl("", fs=15, color=C_DIM,
+                             size_hint_y=None, height=dp(22))
         self.drink_box.add_widget(self.frac_lbl)
 
-        self.glass_btn = GlassBtn(
-            text="한 잔!", on_press=self._drink,
-            size_hint_y=None, height=dp(60),
+        # 소주잔 버튼 (일반 Button)
+        self.drink_btn = _btn(
+            "[ ] 한 잔!", fs=22, bold=True, bg=C_GREEN,
+            size_hint_y=None, height=dp(62),
         )
-        self.drink_box.add_widget(self.glass_btn)
+        self.drink_btn.bind(on_release=self._drink)
+        self.drink_box.add_widget(self.drink_btn)
 
+        # 하단 버튼
         row = BoxLayout(spacing=dp(5), size_hint_y=None, height=dp(38))
-        rb = _btn("초기화", fs=12, bg=(0.65, 0.35, 0.35, 1))
+        rb = _btn("초기화", fs=12, bg=(0.60, 0.30, 0.30, 1))
         rb.bind(on_release=self._reset)
-        cb = _btn("주량 변경", fs=12, bg=(0.45, 0.45, 0.60, 1))
+        cb = _btn("주량 변경", fs=12, bg=(0.40, 0.40, 0.55, 1))
         cb.bind(on_release=self._change)
         row.add_widget(rb)
         row.add_widget(cb)
@@ -509,7 +322,7 @@ class SojuTracker(BoxLayout):
         self.face.reset()
         self._refresh()
 
-    def _drink(self):
+    def _drink(self, *_):
         if self.sel is None:
             return
         self.count += 1
@@ -525,15 +338,19 @@ class SojuTracker(BoxLayout):
         self.info_lbl.text = f"주량: {self.sel:g}병 ({lim}잔)"
         self.frac_lbl.text = f"{c} / {lim} 잔"
         ratio = c / lim if lim else 0
+
         if c >= lim:
             self.face.show_dog()
-            self.glass_btn.set_state("그만 드세요!", C_RED)
+            self.drink_btn.text = "그만 드세요!"
+            self.drink_btn.background_color = C_RED
         elif c >= lim * 0.7:
             self.face.set_redness(min(1.0, ratio))
-            self.glass_btn.set_state("한 잔... (거의 다!)", C_ORANGE)
+            self.drink_btn.text = "[ ] 한 잔... (거의 다!)"
+            self.drink_btn.background_color = C_ORANGE
         else:
             self.face.set_redness(ratio)
-            self.glass_btn.set_state("한 잔!", C_GREEN)
+            self.drink_btn.text = "[ ] 한 잔!"
+            self.drink_btn.background_color = C_GREEN
 
     def _alarm(self):
         if self._sound:
@@ -545,7 +362,7 @@ class SojuTracker(BoxLayout):
         self._vibrate()
 
         box = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(16))
-        box.add_widget(_lbl("멍! 멍!", fs=32, bold=True, color=C_RED))
+        box.add_widget(_lbl("U^.^U  멍! 멍!", fs=28, bold=True, color=C_RED))
         box.add_widget(_lbl(
             f"{self.sel:g}병({self.limit}잔)을\n모두 마셨습니다!\n\n"
             "이제 그만 드세요!",
@@ -627,7 +444,6 @@ class SojuTracker(BoxLayout):
             b.background_color = CAP_COLORS[i]
 
 
-# ── App ─────────────────────────────────────────────────────
 class SojuTrackerApp(App):
     def build(self):
         self.title = "소주 주량 트래커"
