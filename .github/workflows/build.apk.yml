@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, claude/fix-app-crash-startup-ENK11 ]
   workflow_dispatch:
 
 jobs:
@@ -46,6 +46,6 @@ jobs:
     - name: APK 업로드
       uses: actions/upload-artifact@v4
       with:
-        name: SojuTracker-APK
+        name: SurveyCrossSection-APK
         path: bin/*.apk
         retention-days: 30
