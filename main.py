@@ -2058,6 +2058,145 @@ class ExportScreen(Screen):
             popup_msg("오류", str(e))
 
 
+class LevelScreen(Screen):
+    """레벨측정 화면 - WebView로 외부 사이트 로드"""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._webview = None
+        self._webview_layout = None
+        self._build()
+
+    def _build(self):
+        root = BoxLayout(orientation='vertical')
+        bg_rect(root, BG_DARK)
+
+        top = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(4),
+                        padding=(dp(4), dp(2)))
+        bg_rect(top, BG_PANEL)
+        top.add_widget(mk_lbl("레벨측정", font_size=sp(16), bold=True,
+                               halign='center', valign='middle'))
+        btn_reload = mk_btn("새로고침", h=dp(36), size_hint_x=0.3,
+                            font_size=sp(11))
+        btn_reload.bind(on_press=self._reload)
+        top.add_widget(btn_reload)
+        root.add_widget(top)
+
+        self._container = BoxLayout()
+        bg_rect(self._container, BG_DARK)
+        self._placeholder = mk_lbl(
+            "레벨측정 페이지 로딩 중...",
+            font_size=sp(14), halign='center', valign='middle')
+        self._placeholder.bind(size=self._placeholder.setter('text_size'))
+        self._container.add_widget(self._placeholder)
+        root.add_widget(self._container)
+        self.add_widget(root)
+
+    def on_enter(self):
+        if self._webview is None:
+            Clock.schedule_once(lambda dt: self._init_webview(), 0.3)
+        else:
+            self._show_webview()
+
+    def _init_webview(self):
+        if not _IS_ANDROID:
+            self._placeholder.text = (
+                "레벨측정\n\n"
+                "이 기능은 Android에서만 사용 가능합니다.\n"
+                "https://thebest-level.netlify.app")
+            return
+
+        try:
+            from jnius import autoclass
+            from android.runnable import run_on_ui_thread
+
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            WebView = autoclass('android.webkit.WebView')
+            WebViewClient = autoclass('android.webkit.WebViewClient')
+            WebSettings = autoclass('android.webkit.WebSettings')
+            FrameLayout = autoclass('android.widget.FrameLayout')
+            LayoutParams = autoclass('android.widget.FrameLayout$LayoutParams')
+            activity = PythonActivity.mActivity
+
+            @run_on_ui_thread
+            def create_webview():
+                try:
+                    wv = WebView(activity)
+                    settings = wv.getSettings()
+                    settings.setJavaScriptEnabled(True)
+                    settings.setDomStorageEnabled(True)
+                    settings.setUseWideViewPort(True)
+                    settings.setLoadWithOverviewMode(True)
+                    settings.setCacheMode(WebSettings.LOAD_DEFAULT)
+                    wv.setWebViewClient(WebViewClient())
+                    wv.loadUrl('https://thebest-level.netlify.app')
+                    self._webview = wv
+
+                    lp = LayoutParams(
+                        LayoutParams.MATCH_PARENT,
+                        LayoutParams.MATCH_PARENT)
+                    activity.addContentView(wv, lp)
+                    self._webview_layout = wv
+                except Exception as e:
+                    Logger.error(f'WebView 생성 실패: {e}')
+                    Clock.schedule_once(
+                        lambda dt: setattr(self._placeholder, 'text',
+                                           f'WebView 로드 실패:\n{e}'), 0)
+
+            create_webview()
+            self._placeholder.text = "로딩 중..."
+
+        except Exception as e:
+            self._placeholder.text = f"WebView 초기화 실패:\n{e}"
+
+    def _show_webview(self):
+        if not _IS_ANDROID or self._webview is None:
+            return
+        try:
+            from jnius import autoclass
+            from android.runnable import run_on_ui_thread
+            View = autoclass('android.view.View')
+
+            @run_on_ui_thread
+            def show():
+                self._webview.setVisibility(View.VISIBLE)
+                self._webview.bringToFront()
+            show()
+        except Exception:
+            pass
+
+    def _hide_webview(self):
+        if not _IS_ANDROID or self._webview is None:
+            return
+        try:
+            from jnius import autoclass
+            from android.runnable import run_on_ui_thread
+            View = autoclass('android.view.View')
+
+            @run_on_ui_thread
+            def hide():
+                self._webview.setVisibility(View.GONE)
+            hide()
+        except Exception:
+            pass
+
+    def on_leave(self):
+        self._hide_webview()
+
+    def _reload(self, *_):
+        if self._webview is not None:
+            try:
+                from android.runnable import run_on_ui_thread
+
+                @run_on_ui_thread
+                def reload():
+                    self._webview.reload()
+                reload()
+            except Exception:
+                pass
+        else:
+            self._init_webview()
+
+
 # =====================================================
 # 메인 앱
 # =====================================================
@@ -2079,6 +2218,7 @@ class SurveyCrossSectionApp(App):
         self.sm.add_widget(DrawScreen(name='draw'))
         self.sm.add_widget(PhotoScreen(name='photo'))
         self.sm.add_widget(ExportScreen(name='export'))
+        self.sm.add_widget(LevelScreen(name='level'))
         root.add_widget(self.sm)
 
         root.add_widget(self._build_nav())
@@ -2093,6 +2233,7 @@ class SurveyCrossSectionApp(App):
             ('draw',   '그리기'),
             ('photo',  '사진'),
             ('export', '저장'),
+            ('level',  '레벨측정'),
         ]
         for scr, txt in items:
             b = Button(

@@ -23,7 +23,7 @@ android.env_vars = MPLBACKEND=Agg
 orientation = portrait
 
 # 권한
-android.permissions = READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+android.permissions = INTERNET,READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 
 # Android 설정 (원래 빌드 성공했던 값 유지)
 android.api = 35
