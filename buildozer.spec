@@ -11,7 +11,7 @@ source.include_exts = py,png,jpg,kv,atlas,ttf
 source.include_patterns = fonts/*.ttf
 
 # 버전
-version = 1.0
+version = 2.0
 
 # requirements
 requirements = python3,kivy==2.3.0,pillow,matplotlib,numpy
