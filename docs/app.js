@@ -41,7 +41,6 @@ function switchNo(idx) {
     });
     document.getElementById('inputHeader').textContent = `NO.${idx + 1} 측점 데이터`;
     refreshTable();
-    refreshPhoto();
     refreshDrawPhoto();
 }
 
@@ -53,9 +52,6 @@ function switchSubTab(tab) {
     document.querySelectorAll('.tab-content').forEach(el => {
         el.classList.toggle('active', el.id === `tab-${tab}`);
     });
-    if (tab === 'export') {
-        document.getElementById('titleInput').value = appData.titleText;
-    }
 }
 
 // ==================== 테이블 관리 ====================
@@ -204,85 +200,7 @@ function toggleUnit() {
     document.getElementById('unitBtn').textContent = appData.unit;
 }
 
-// ==================== 사진 관리 ====================
-function addPhoto() {
-    document.getElementById('photoFileInput').click();
-}
-
-function handlePhotoFiles(event) {
-    const files = event.target.files;
-    if (!files.length) return;
-
-    const sec = appData.sections[appData.currentNo];
-    for (const file of files) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            sec.photos.push({dataUrl: e.target.result, name: file.name, note: ''});
-            if (sec.photos.length === 1) sec.photoIdx = 0;
-            refreshPhoto();
-        };
-        reader.readAsDataURL(file);
-    }
-    event.target.value = '';
-}
-
-function refreshPhoto() {
-    const sec = appData.sections[appData.currentNo];
-    const counter = document.getElementById('photoCounter');
-    const placeholder = document.getElementById('photoPlaceholder');
-    const img = document.getElementById('photoImage');
-    const memo = document.getElementById('photoMemo');
-
-    if (!sec.photos.length) {
-        counter.textContent = '사진 없음';
-        placeholder.style.display = 'block';
-        img.style.display = 'none';
-        memo.value = '';
-        return;
-    }
-
-    const idx = sec.photoIdx;
-    const entry = sec.photos[idx];
-    counter.textContent = `${idx + 1}/${sec.photos.length}  ${entry.name}`;
-    placeholder.style.display = 'none';
-    img.style.display = 'block';
-    img.src = entry.dataUrl;
-    memo.value = entry.note || '';
-}
-
-function prevPhoto() {
-    const sec = appData.sections[appData.currentNo];
-    if (!sec.photos.length) return;
-    sec.photoIdx = (sec.photoIdx - 1 + sec.photos.length) % sec.photos.length;
-    refreshPhoto();
-}
-
-function nextPhoto() {
-    const sec = appData.sections[appData.currentNo];
-    if (!sec.photos.length) return;
-    sec.photoIdx = (sec.photoIdx + 1) % sec.photos.length;
-    refreshPhoto();
-}
-
-function deletePhoto() {
-    const sec = appData.sections[appData.currentNo];
-    if (!sec.photos.length) return;
-    showConfirm('현재 사진을 삭제하시겠습니까?', () => {
-        sec.photos.splice(sec.photoIdx, 1);
-        sec.photoIdx = Math.max(0, Math.min(sec.photoIdx, sec.photos.length - 1));
-        refreshPhoto();
-    });
-}
-
-function saveMemo() {
-    const sec = appData.sections[appData.currentNo];
-    if (sec.photos.length) {
-        sec.photos[sec.photoIdx].note = document.getElementById('photoMemo').value;
-        showToast('메모가 저장되었습니다.');
-    }
-}
-
-// ==================== 그리기탭 현장사진 ====================
+// ==================== 현장사진 관리 ====================
 function addDrawPhoto() {
     document.getElementById('drawPhotoFileInput').click();
 }
@@ -297,7 +215,6 @@ function handleDrawPhotoFiles(event) {
             sec.photos.push({dataUrl: e.target.result, name: file.name, note: ''});
             if (sec.photos.length === 1) sec.photoIdx = 0;
             refreshDrawPhoto();
-            refreshPhoto();
         };
         reader.readAsDataURL(file);
     }
@@ -330,7 +247,6 @@ function prevDrawPhoto() {
     if (!sec.photos.length) return;
     sec.photoIdx = (sec.photoIdx - 1 + sec.photos.length) % sec.photos.length;
     refreshDrawPhoto();
-    refreshPhoto();
 }
 
 function nextDrawPhoto() {
@@ -338,7 +254,6 @@ function nextDrawPhoto() {
     if (!sec.photos.length) return;
     sec.photoIdx = (sec.photoIdx + 1) % sec.photos.length;
     refreshDrawPhoto();
-    refreshPhoto();
 }
 
 function deleteDrawPhoto() {
@@ -348,7 +263,6 @@ function deleteDrawPhoto() {
         sec.photos.splice(sec.photoIdx, 1);
         sec.photoIdx = Math.max(0, Math.min(sec.photoIdx, sec.photos.length - 1));
         refreshDrawPhoto();
-        refreshPhoto();
     });
 }
 
@@ -390,90 +304,32 @@ function savePDF() {
     renderCrossSection(offCanvas, pts, no);
     const crossImgData = offCanvas.toDataURL('image/png');
 
-    // A3 landscape: 420 x 297 mm
-    const pdfW = 420, pdfH = 297;
     const scale = 3;
 
     const crossImg = new Image();
     crossImg.onload = () => {
         const renderPDF = (photoImg) => {
-            const pdfCanvas = document.createElement('canvas');
-            pdfCanvas.width = pdfW * scale;
-            pdfCanvas.height = pdfH * scale;
-            const ctx = pdfCanvas.getContext('2d');
+            const blockW = offCanvas.width;
+            const blockH = offCanvas.height;
 
+            const pdfCanvas = document.createElement('canvas');
+            pdfCanvas.width = blockW;
+            if (photoImg) {
+                pdfCanvas.height = blockH * 2;
+            } else {
+                pdfCanvas.height = blockH;
+            }
+
+            const ctx = pdfCanvas.getContext('2d');
             ctx.fillStyle = 'white';
             ctx.fillRect(0, 0, pdfCanvas.width, pdfCanvas.height);
 
-            const W = pdfCanvas.width;
-            const H = pdfCanvas.height;
-            const pad = W * 0.02;
+            // Cross-section (top, full bleed)
+            ctx.drawImage(crossImg, 0, 0, blockW, blockH);
 
             if (photoImg) {
-                // Split layout: cross-section top, photo bottom
-                const topH = H * 0.52;
-                const bottomH = H * 0.44;
-                const topY = pad;
-                const bottomY = topH + pad * 2;
-
-                // Draw divider line
-                ctx.strokeStyle = '#ccc';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(pad, topH + pad);
-                ctx.lineTo(W - pad, topH + pad);
-                ctx.stroke();
-
-                // Draw cross-section (top)
-                const crossRatio = crossImg.width / crossImg.height;
-                const availW = W - pad * 2;
-                let cw, ch;
-                if (crossRatio > availW / topH) {
-                    cw = availW;
-                    ch = cw / crossRatio;
-                } else {
-                    ch = topH;
-                    cw = ch * crossRatio;
-                }
-                const cx = (W - cw) / 2;
-                const cy = topY + (topH - ch) / 2;
-                ctx.drawImage(crossImg, cx, cy, cw, ch);
-
-                // Draw photo (bottom)
-                const photoRatio = photoImg.width / photoImg.height;
-                let pw, ph;
-                if (photoRatio > availW / bottomH) {
-                    pw = availW;
-                    ph = pw / photoRatio;
-                } else {
-                    ph = bottomH;
-                    pw = ph * photoRatio;
-                }
-                const px = (W - pw) / 2;
-                const py = bottomY + (bottomH - ph) / 2;
-                ctx.drawImage(photoImg, px, py, pw, ph);
-
-                // Labels
-                ctx.fillStyle = '#333';
-                ctx.font = `bold ${14 * scale}px 'Noto Sans KR', sans-serif`;
-                ctx.textAlign = 'left';
-                ctx.fillText(`횡단면도 [NO.${no + 1}]`, pad, topY + 14 * scale);
-                ctx.fillText('현장사진', pad, bottomY + 14 * scale);
-            } else {
-                // No photo: full-page cross-section (original behavior)
-                const imgRatio = crossImg.width / crossImg.height;
-                const canvasRatio = W / H;
-                let dw, dh, dx, dy;
-                if (imgRatio > canvasRatio) {
-                    dw = W * 0.95;
-                    dh = dw / imgRatio;
-                } else {
-                    dh = H * 0.95;
-                    dw = dh * imgRatio;
-                }
-                dx = (W - dw) / 2;
-                dy = (H - dh) / 2;
-                ctx.drawImage(crossImg, dx, dy, dw, dh);
+                // Photo (bottom, fill entire block)
+                ctx.drawImage(photoImg, 0, blockH, blockW, blockH);
             }
 
             pdfCanvas.toBlob(blob => {
@@ -483,7 +339,7 @@ function savePDF() {
                 a.download = `cross_section_NO${no + 1}_${timestamp()}.png`;
                 a.click();
                 URL.revokeObjectURL(url);
-                showToast(photoImg ? '횡단면도 + 현장사진 저장 완료! (A3)' : '고해상도 이미지 저장 완료! (A3 크기)');
+                showToast(photoImg ? '횡단면도 + 현장사진 저장 완료!' : '횡단면도 저장 완료!');
             }, 'image/png');
         };
 
