@@ -3,3 +3,5 @@ __pycache__/
 *.pyo
 .buildozer/
 bin/
+surveycrosssection-web/node_modules/
+surveycrosssection-web/dist/
